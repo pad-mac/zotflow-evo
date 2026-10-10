@@ -35,6 +35,7 @@ Keep this list complete. One entry per change, newest last.
 | Plugin id `zotflow-evo`, name "ZotFlow Evo" | `manifest.json` | With the original id, Obsidian offers to "update" to the official release and overwrites this build. |
 | Removed the "Request Enhancement Pack beta" step and its line in the release notes | `.github/workflows/beta-release.yml` | It calls the upstream author's repo with a secret this fork does not have. |
 | Removed the notify workflow | `.github/workflows/notify-enhancement-pack.yml` (deleted) | Same reason. |
+| Beta builds also start from a version file or a manual run; the workflow then creates the tag itself | `.github/workflows/beta-release.yml`, `.github/beta-version` (new) | The environment this fork is maintained from can push branches but not tags. |
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
@@ -61,13 +62,25 @@ None yet. `zotflow` is identical to upstream at `e6dfec28`.
 
 Releases are built by GitHub Actions from a tag; nothing is built by hand.
 
-- The tag's commit must be on `dev` (both release workflows check this).
-- **Test build:** annotated tag `x.y.z-beta.N` on `dev` → published
-  prerelease with `main.js`, `manifest.json`, `styles.css`. The workflow sets
-  the version in the runner; version files are not committed. Never move or
-  reuse a published tag.
-- **Stable build:** `npm version patch|minor|major` on `dev`, push commit and
-  tag → a *draft* release that has to be published by hand.
+- The built commit must be on `dev` (both release workflows check this).
+- **Test build (the normal way):** write the next version, `x.y.z-beta.N`,
+  into `.github/beta-version`, commit, push `dev`. The workflow builds that
+  commit, creates the tag on it and publishes a prerelease with `main.js`,
+  `manifest.json`, `styles.css`. Pushes to `dev` that do not touch the file
+  build nothing.
+- **Test build (fallback):** Actions → Beta Release → Run workflow, type the
+  version. Builds the head of `dev`. The button only appears if the
+  repository's default branch contains this workflow, i.e. the default branch
+  is `dev`.
+- Pushing an `x.y.z-beta.N` tag still works too, as upstream does it.
+- The workflow sets the version in the runner; `manifest.json` and
+  `package.json` keep the upstream version in the repo. A published beta
+  number is never moved or reused: the workflow refuses a version whose tag
+  exists on another commit, so always take the next number.
+- **Stable build:** unchanged from upstream and still tag-only:
+  `npm version patch|minor|major` on `dev`, push commit and tag → a *draft*
+  release that has to be published by hand. The tag has to be pushed by
+  someone who can push tags.
 - Install with BRAT pointed at `pad-mac/zotflow-evo`.
 
 ## Taking upstream updates
