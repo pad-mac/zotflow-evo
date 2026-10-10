@@ -2,6 +2,9 @@
 
 > This document is the single source of truth for any AI agent working on this
 > codebase. Read it fully before making changes.
+>
+> **Fork:** this repository is ZotFlow Evo, a fork. Read `FORK.md` first; it
+> lists every difference from upstream (the plugin id here is `zotflow-evo`).
 
 ---
 

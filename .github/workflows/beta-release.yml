@@ -98,10 +98,9 @@ jobs:
                     echo "Release $RELEASE_VERSION already exists; keeping it for an idempotent rerun"
                     exit 0
                   fi
-                  notes="$(printf '%s\n\n%s\n\n%s\n\n%s' \
-                    "ZotFlow beta built from commit \`$SOURCE_SHA\`." \
+                  notes="$(printf '%s\n\n%s\n\n%s' \
+                    "ZotFlow Evo beta built from commit \`$SOURCE_SHA\`." \
                     "Validated with \`npm test\` and \`npm run build:ci\`." \
-                    "Enhancement Pack compatibility is checked after this release is created." \
                     "Install with BRAT pinned to this version or download the attached assets.")"
                   gh release create "$RELEASE_VERSION" \
                     --verify-tag \
@@ -113,27 +112,3 @@ jobs:
                     manifest.json \
                     styles.css \
                     SHA256SUMS.txt
-
-            - name: Request Enhancement Pack beta if needed
-              uses: actions/github-script@v7
-              env:
-                  RELEASE_VERSION: ${{ github.ref_name }}
-                  SOURCE_SHA: ${{ steps.source.outputs.sha }}
-              with:
-                  github-token: ${{ secrets.ENHANCEMENT_PACK_DISPATCH_TOKEN }}
-                  script: |
-                      const fs = require("node:fs");
-                      const lock = JSON.parse(fs.readFileSync("document-worker.lock.json", "utf8"));
-
-                      await github.rest.repos.createDispatchEvent({
-                          owner: "duanxianpi",
-                          repo: "zotflow-enhancement-pack",
-                          event_type: "document-worker-beta-requested",
-                          client_payload: {
-                              channel: "beta",
-                              zotflowCommit: process.env.SOURCE_SHA,
-                              zotflowVersion: process.env.RELEASE_VERSION,
-                              documentWorkerCommit: lock.documentWorker.commit,
-                              protocol: lock.enhancementPack.protocol,
-                          },
-                      });
