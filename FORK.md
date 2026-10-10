@@ -36,10 +36,27 @@ Keep this list complete. One entry per change, newest last.
 | Removed the "Request Enhancement Pack beta" step and its line in the release notes | `.github/workflows/beta-release.yml` | It calls the upstream author's repo with a secret this fork does not have. |
 | Removed the notify workflow | `.github/workflows/notify-enhancement-pack.yml` (deleted) | Same reason. |
 | Beta builds also start from a version file or a manual run; the workflow then creates the tag itself | `.github/workflows/beta-release.yml`, `.github/beta-version` (new) | The environment this fork is maintained from can push branches but not tags. |
+| Reader toolbar toggle and comment popup toggle: two header buttons per reader view, two commands, two settings (`readerToolbarHidden`, `readerCommentPopupSuppressed`) | `src/ui/reader/chrome.ts` (new, all the logic). Hooks: `attachReaderChromeControls()` in the constructors and `...readerChromeOptions()` in the `initReader` options of `src/ui/reader/view.ts` and `local-view.ts`; `setToolbarHidden()` / `setAnnotationPopupSuppressed()` in `src/ui/reader/bridge.ts`; `registerReaderChromeCommands()` in `src/main.ts`; the two keys in `src/settings/types.ts`; the option and child-API types in `src/types/zotero-reader.d.ts` | Requested: hide the reader toolbar from the view header; no comment popup (the note strip will replace it). The settings have no entry in the settings tab; the buttons and commands are their interface. |
+| Reader theme refresh on every `css-change`, not only on a light/dark flip | `requestReaderThemeRefresh()` in `src/ui/reader/chrome.ts`; one `else if` in the `css-change` handler of `view.ts` and `local-view.ts` | A theme, snippet or Style Settings change keeps the scheme but changes the colours. |
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
-None yet. `zotflow` is identical to upstream at `e6dfec28`.
+All fork logic is in `src/obsidian-evo.js` and
+`src/common/stylesheets/components/_evo.scss` (both new). Upstream files
+only call into them; every such line is marked `ZotFlow Evo`.
+
+| Change | Where | Why |
+| --- | --- | --- |
+| Obsidian's variables are read from the computed style of the element hosting the reader and written into the reader document and each view iframe | `refreshResolvedObsidianVariables()` / `applyResolvedObsidianVariables()` in `obsidian-evo.js`. Hooks in `src/index.obsidian.reader.js`: start of `createReader()`, start of `applyColorSchemeForAll()`, first line of `adoptObsidianStyles()` | Upstream only copies variables from rules whose selector is exactly `body`, `:root`, `.theme-light` or `.theme-dark`; anything a theme, snippet or Style Settings sets elsewhere was missed and the reader showed the default palette. Variables a reader document declares itself are never overwritten, and `--page-border` is never copied (same as upstream's filter). |
+| Toolbar and the area around the page use `--background-primary` | `_evo.scss` overrides `--color-toolbar`; `main.scss` imports `components/evo` last | Requested. Upstream maps `--color-toolbar` to `--file-header-background`. |
+| Toolbar can be hidden | `applyToolbarHidden()` sets `body.zf-evo-toolbar-hidden`; layout in `_evo.scss`. Child API `setToolbarHidden` in `src/index.obsidian.js`, option `toolbarHidden` read in `createReader()` | Requested. |
+| Comment popup can be turned off | `applyAnnotationPopupSuppressed()` sets the reader state key `zfEvoSuppressAnnotationPopup`; one extra condition where `src/common/components/reader-ui.js` renders `AnnotationPopup`. Child API `setAnnotationPopupSuppressed`, option `annotationPopupSuppressed` | Requested. Same mechanism upstream uses while the annotations sidebar is open. |
+
+Known limits of these: with the toolbar hidden, Tab still cycles through
+the hidden toolbar's focus groups (`focus-manager.js` is untouched), and the
+appearance and read-aloud popups keep their 41px offset. With the comment
+popup off, comments are edited in the annotations sidebar until the note
+strip exists.
 
 ## Consequences of the id change
 

@@ -29,6 +29,7 @@ import { ZotFlowLockExtension } from "ui/editor/zotflow-lock-extension";
 import { ZotFlowEditableRegionExtension } from "ui/editor/zotflow-editable-region-extension";
 import { handleEditorDrop } from "ui/editor/citation-helper";
 import { startSync } from "ui/start-sync";
+import { registerReaderChromeCommands } from "ui/reader/chrome";
 import { promptNoteGone } from "ui/modals/note-gone-modal";
 
 import { openAttachment, openItemNote } from "utils/viewer";
@@ -286,6 +287,9 @@ export default class ZotFlow extends Plugin {
                 new ActivityCenterModal(this.app).open();
             },
         );
+
+        // ZotFlow Evo: reader toolbar and comment popup toggles.
+        registerReaderChromeCommands(this);
 
         this.addCommand({
             id: "open-tree-view",

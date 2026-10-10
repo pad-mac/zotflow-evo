@@ -992,3 +992,57 @@ describe("lifecycle", () => {
         expect(seen).toHaveLength(1);
     });
 });
+
+/* ------------------------------------------------------------------ */
+/*  ZotFlow Evo: reader chrome                                        */
+/* ------------------------------------------------------------------ */
+
+describe("ZotFlow Evo: reader chrome", () => {
+    it("passes the toolbar and comment popup toggles to the reader", async () => {
+        const h = harness();
+        await h.completeHandshake();
+        await h.bridge.initReader(makeReaderOptions({ annotations: [] }));
+
+        await h.bridge.setToolbarHidden(true);
+        await h.bridge.setAnnotationPopupSuppressed(true);
+
+        expect(h.child.setToolbarHidden).toHaveBeenCalledWith(true);
+        expect(h.child.setAnnotationPopupSuppressed).toHaveBeenCalledWith(
+            true,
+        );
+    });
+
+    it("holds a toggle issued while connecting until the child registers", async () => {
+        const h = harness();
+        await h.bridge.setToolbarHidden(true);
+        expect(h.child.setToolbarHidden).not.toHaveBeenCalled();
+
+        await h.completeHandshake();
+        expect(h.child.setToolbarHidden).toHaveBeenCalledWith(true);
+    });
+
+    it("replays the toggles as last set, not as of open, after a reload", async () => {
+        const h = harness();
+        await h.completeHandshake();
+        await h.bridge.initReader(
+            makeReaderOptions({
+                annotations: [],
+                toolbarHidden: false,
+                annotationPopupSuppressed: false,
+            }),
+        );
+
+        await h.bridge.setToolbarHidden(true);
+        await h.bridge.setAnnotationPopupSuppressed(true);
+
+        // An unexpected reload, driven through to a re-established reader.
+        h.reparent();
+        await vi.waitFor(() => expect(h.iframes).toHaveLength(2));
+        await h.register();
+        await vi.waitFor(() => expect(h.bridge.state).toBe("reader-ready"));
+
+        const replayed = h.child.initReader.mock.calls[1]![0];
+        expect(replayed.toolbarHidden).toBe(true);
+        expect(replayed.annotationPopupSuppressed).toBe(true);
+    });
+});

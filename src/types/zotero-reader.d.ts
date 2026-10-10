@@ -33,6 +33,10 @@ export interface CreateReaderOptions {
     autoDisableTextTool?: boolean;
     autoDisableImageTool?: boolean;
     fontFamily?: string;
+    /** ZotFlow Evo: start with the reader toolbar hidden. */
+    toolbarHidden?: boolean;
+    /** ZotFlow Evo: do not open the comment popup next to annotations. */
+    annotationPopupSuppressed?: boolean;
 }
 
 /** Discriminated union of all events the reader iframe can emit to the parent. */
@@ -144,6 +148,10 @@ export type ChildAPI = {
     addAnnotation: (annotation: AnnotationJSON) => Promise<boolean>;
     refreshAnnotations: (annotations: AnnotationJSON[]) => Promise<boolean>;
     navigate: (navigationInfo: ReaderNavigation) => Promise<boolean>;
+    /** ZotFlow Evo */
+    setToolbarHidden: (hidden: boolean) => Promise<boolean>;
+    /** ZotFlow Evo */
+    setAnnotationPopupSuppressed: (suppressed: boolean) => Promise<boolean>;
     destroy: () => Promise<boolean>;
 };
 

@@ -26,6 +26,11 @@ import {
     errorMessage as describeError,
 } from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
+import {
+    attachReaderChromeControls,
+    readerChromeOptions,
+    requestReaderThemeRefresh,
+} from "ui/reader/chrome";
 import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
 /** View type identifier for the Zotero cloud reader view. */
@@ -75,6 +80,8 @@ export class ZoteroReaderView extends ItemView {
             "Open source note",
             this.handleOpenSourceNote.bind(this),
         );
+        // ZotFlow Evo: toolbar and comment popup toggles.
+        attachReaderChromeControls(this, () => this.bridge);
     }
 
     /**
@@ -426,6 +433,12 @@ export class ZoteroReaderView extends ItemView {
                                         "Failed to set the reader colour scheme",
                                     );
                                     this.colorScheme = newColorScheme;
+                                } else if (newColorScheme) {
+                                    // ZotFlow Evo: same scheme, new theme colours.
+                                    requestReaderThemeRefresh(
+                                        this.bridge,
+                                        newColorScheme,
+                                    );
                                 }
                             }
                         }),
@@ -538,6 +551,7 @@ export class ZoteroReaderView extends ItemView {
                 autoDisableTextTool: autoDisable,
                 autoDisableImageTool: autoDisable,
                 fontFamily: services.settings.epubFontFamily || undefined,
+                ...readerChromeOptions(),
                 ...themeOverrides,
                 ...(isReadOnly ? { readOnly: true } : {}),
             };

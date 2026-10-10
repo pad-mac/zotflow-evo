@@ -79,6 +79,10 @@ export interface ZotFlowSettings {
     autoPurgeTrashedSourceNotes: boolean;
     autoDisableNoteImageTextTools: boolean;
     epubFontFamily: string;
+    /** ZotFlow Evo: reader toolbar hidden (toggled from the view header). */
+    readerToolbarHidden: boolean;
+    /** ZotFlow Evo: comment popup next to annotations turned off. */
+    readerCommentPopupSuppressed: boolean;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -158,6 +162,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     autoPurgeTrashedSourceNotes: false,
     autoDisableNoteImageTextTools: true,
     epubFontFamily: "",
+    readerToolbarHidden: false,
+    readerCommentPopupSuppressed: false,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

@@ -763,6 +763,23 @@ export class IframeReaderBridge {
         });
     }
 
+    /** ZotFlow Evo: show or hide the reader toolbar. */
+    setToolbarHidden(hidden: boolean) {
+        // Kept for the replay after an iframe reload.
+        this.updateReaderOpts({ toolbarHidden: hidden });
+        return this.runAfterBridgeReady(async () => {
+            await this.child!.setToolbarHidden(hidden);
+        });
+    }
+
+    /** ZotFlow Evo: turn the comment popup next to annotations on or off. */
+    setAnnotationPopupSuppressed(suppressed: boolean) {
+        this.updateReaderOpts({ annotationPopupSuppressed: suppressed });
+        return this.runAfterBridgeReady(async () => {
+            await this.child!.setAnnotationPopupSuppressed(suppressed);
+        });
+    }
+
     addAnnotation(annotation: AnnotationJSON) {
         return this.runAfterReaderReady(async () => {
             await this.child!.addAnnotation(annotation);
