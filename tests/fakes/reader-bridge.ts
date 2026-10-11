@@ -233,6 +233,7 @@ export function createFakeChild() {
         setAnnotationPopupSuppressed: vi.fn((_suppressed: boolean) =>
             Promise.resolve(true),
         ),
+        setNoteStrip: vi.fn((_settings: unknown) => Promise.resolve(true)),
         destroy: vi.fn(() => Promise.resolve(true)),
     };
 }

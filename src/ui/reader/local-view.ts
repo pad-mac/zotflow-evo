@@ -28,6 +28,7 @@ import {
     attachReaderChromeControls,
     readerChromeOptions,
     requestReaderThemeRefresh,
+    sendNoteStripBanner,
 } from "ui/reader/chrome";
 import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
@@ -66,7 +67,11 @@ export class LocalReaderView extends ItemView {
             this.handleOpenSourceNote.bind(this),
         );
         // ZotFlow Evo: toolbar and comment popup toggles.
-        attachReaderChromeControls(this, () => this.bridge);
+        attachReaderChromeControls(
+            this,
+            () => this.bridge,
+            () => (this.file ? { text: this.file.basename } : undefined),
+        );
     }
 
     /**
@@ -441,6 +446,8 @@ export class LocalReaderView extends ItemView {
                     ...opts,
                 });
                 readerInitialized = true;
+                // ZotFlow Evo: the line above the note strip.
+                sendNoteStripBanner(this.bridge, { text: file.basename });
             } catch (e) {
                 // If another Promise rejected first, release the lease when its
                 // in-flight load eventually settles.

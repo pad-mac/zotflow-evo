@@ -30,6 +30,11 @@ import { ZotFlowEditableRegionExtension } from "ui/editor/zotflow-editable-regio
 import { handleEditorDrop } from "ui/editor/citation-helper";
 import { startSync } from "ui/start-sync";
 import { registerReaderChromeCommands } from "ui/reader/chrome";
+import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
+import {
+    refreshEvoAutoSync,
+    startEvoAutoSync,
+} from "services/evo-auto-sync";
 import { promptNoteGone } from "ui/modals/note-gone-modal";
 
 import { openAttachment, openItemNote } from "utils/viewer";
@@ -189,6 +194,11 @@ export default class ZotFlow extends Plugin {
                 ),
                 "Failed to register the tree view",
             );
+            // ZotFlow Evo: sync when Zotero changes and after changes made here.
+            startEvoAutoSync(this, [
+                ZOTERO_READER_VIEW_TYPE,
+                LOCAL_ZOTERO_READER_VIEW_TYPE,
+            ]);
         });
         finishStage("Register views and layout callback");
 
@@ -288,8 +298,10 @@ export default class ZotFlow extends Plugin {
             },
         );
 
-        // ZotFlow Evo: reader toolbar and comment popup toggles.
+        // ZotFlow Evo: reader toolbar, comment popup and note strip toggles;
+        // the library browser tab.
         registerReaderChromeCommands(this);
+        registerEvoWorkspaceCommands(this);
 
         this.addCommand({
             id: "open-tree-view",
@@ -674,6 +686,8 @@ export default class ZotFlow extends Plugin {
         await this.loadSettings();
         workerBridge.updateSettings(this.settings);
         services.updateSettings(this.settings);
+        // ZotFlow Evo
+        refreshEvoAutoSync();
         services.viewStateService.setViewStates(this.viewStates);
         services.viewStateService.setCustomThemes(this.customThemes);
         if (this.cslFolder) {
@@ -705,6 +719,8 @@ export default class ZotFlow extends Plugin {
         await this.saveData(data);
         workerBridge.updateSettings(this.settings);
         services.updateSettings(this.settings);
+        // ZotFlow Evo: the API key or an automatic sync switch may have changed.
+        refreshEvoAutoSync();
 
         this.applyEditableRegionMarkerVisibility();
     }

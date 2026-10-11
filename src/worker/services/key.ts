@@ -46,6 +46,14 @@ export class KeyService {
         return db.keys.get(apiKey);
     }
 
+    /**
+     * ZotFlow Evo: the library version this device has synced up to, 0 when
+     * unknown. Automatic sync compares it with the version Zotero announces.
+     */
+    async getLibraryVersion(libraryID: number): Promise<number> {
+        return (await db.libraries.get(libraryID))?.itemVersion ?? 0;
+    }
+
     // Delete a key record.
     async deleteKey(apiKey: string): Promise<void> {
         await db.keys.delete(apiKey);

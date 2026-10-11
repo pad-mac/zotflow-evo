@@ -17,6 +17,8 @@ export class SyncTask extends BaseTask {
         private taskManager?: TaskManager,
         private libraryNoteService?: LibraryNoteService,
         private settings?: ZotFlowSettings,
+        // ZotFlow Evo: an automatic sync reports failures only.
+        private quiet = false,
     ) {
         super("sync", parentHost);
         this.displayText = libraryId
@@ -48,6 +50,7 @@ export class SyncTask extends BaseTask {
                     this.reportProgress(completed, total, message);
                 },
                 this.libraryId,
+                { quiet: this.quiet },
             );
 
         this.result = {

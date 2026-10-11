@@ -7,7 +7,11 @@ import { services } from "services/services";
  * older state than the one on screen. Every sync started from the UI goes
  * through here.
  */
-export async function startSync(libraryId?: number): Promise<string> {
+export async function startSync(
+    libraryId?: number,
+    // ZotFlow Evo: an automatic sync, which reports failures only.
+    quiet?: boolean,
+): Promise<string> {
     await services.pendingEdits.flushAll();
-    return workerBridge.createSyncTask(libraryId);
+    return workerBridge.createSyncTask(libraryId, quiet);
 }

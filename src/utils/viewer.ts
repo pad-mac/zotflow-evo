@@ -4,6 +4,7 @@ import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
 import { services } from "../services/services";
 import { focusReaderLeaf } from "utils/reader-leaf-navigation";
+import { newReaderLeaf } from "utils/evo-reader-leaf";
 
 import type { ReaderNavigation } from "types/zotero-reader";
 
@@ -42,7 +43,8 @@ export async function openAttachment(
     if (activeLeaf) {
         await focusReaderLeaf(app.workspace, activeLeaf);
     } else {
-        activeLeaf = app.workspace.getLeaf("tab");
+        // ZotFlow Evo: a new tab, in a pane wide enough for a reader.
+        activeLeaf = newReaderLeaf(app);
 
         await activeLeaf.setViewState({
             type: ZOTERO_READER_VIEW_TYPE,

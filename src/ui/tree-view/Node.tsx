@@ -26,6 +26,10 @@ import {
 import { TagEditModal } from "ui/modals/tag-edit";
 import { zoteroLibraryPrefix, zoteroSelectItemUri } from "utils/zotero-uri";
 import { splitHighlight } from "utils/search-query";
+import {
+    isLibraryBrowserTab,
+    openItemPrimaryAttachment,
+} from "ui/tree-view/evo-browser";
 
 /** Pixel indentation per tree depth level. */
 export const INDENT_SIZE = 20;
@@ -142,6 +146,34 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
 
     // The setting is read at event time so toggling it applies live.
     const handleOnClick = (e: React.MouseEvent) => {
+        // ZotFlow Evo: in the library browser tab a click opens the item's
+        // PDF, EPUB or snapshot (asking when there are several).
+        if (nodeType === "item" && isLibraryBrowserTab(e.currentTarget)) {
+            if (
+                isTopLevelItem &&
+                node.data.itemType !== "attachment" &&
+                node.data.itemType !== "note"
+            ) {
+                void openItemPrimaryAttachment(
+                    node.data.libraryID,
+                    node.data.key,
+                    services.app,
+                ).catch((err) => {
+                    services.logService.error(
+                        "Failed to open the item's attachment",
+                        "TreeView",
+                        err,
+                    );
+                    services.notificationService.notify(
+                        "error",
+                        "Failed to open attachment.",
+                    );
+                });
+            } else {
+                openPrimaryTarget();
+            }
+            return;
+        }
         if (!services.settings.treeSingleClickOpen) {
             node.toggle();
             return;
@@ -150,6 +182,8 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
     };
 
     const handleDoubleClick = (e: React.MouseEvent) => {
+        // ZotFlow Evo: the single click has already opened it.
+        if (nodeType === "item" && isLibraryBrowserTab(e.currentTarget)) return;
         if (services.settings.treeSingleClickOpen) return;
         e.stopPropagation();
         node.toggle();

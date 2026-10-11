@@ -1,4 +1,5 @@
 import { services } from "services/services";
+import { handleReaderDrop } from "ui/editor/evo-drop";
 
 import type {
     Editor,
@@ -20,6 +21,11 @@ export interface ZotFlowCitationPayload {
     key: string;
     /** Stripped annotations — only template-relevant fields, no binary/position data. */
     annotations?: AnnotationJSON[];
+    /**
+     * ZotFlow Evo: set on drags that start in the reader — a comment from the
+     * note strip, or a highlight or text selection from the page.
+     */
+    evoSource?: "comment" | "highlight";
 }
 
 function resolveInsertionAnchor(
@@ -92,6 +98,10 @@ export function parseZotFlowCitationPayload(
                 libraryID: obj.libraryID,
                 key: obj.key,
                 annotations: obj.annotations,
+                evoSource:
+                    obj.evoSource === "comment" || obj.evoSource === "highlight"
+                        ? obj.evoSource
+                        : undefined,
             };
         }
     } catch {
@@ -217,6 +227,10 @@ export function handleEditorDrop(
     if (!payload) return;
 
     evt.preventDefault();
+
+    // ZotFlow Evo: comments and highlights dragged out of the reader have
+    // their own drop templates (settings); a modifier key keeps the formats below.
+    if (handleReaderDrop(evt, editor, payload)) return;
 
     const pos = editor.getCursor();
     const baselineDoc = editor.getValue();

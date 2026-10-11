@@ -83,6 +83,28 @@ export interface ZotFlowSettings {
     readerToolbarHidden: boolean;
     /** ZotFlow Evo: comment popup next to annotations turned off. */
     readerCommentPopupSuppressed: boolean;
+    /** ZotFlow Evo: note strip beside PDFs shown (toggled from the view header). */
+    readerNoteStripVisible: boolean;
+    /** ZotFlow Evo: note strip in list mode — comments without the space between them. */
+    readerNoteStripCollapsed: boolean;
+    /** ZotFlow Evo: width of the note strip in pixels. */
+    readerNoteStripWidth: number;
+    /** ZotFlow Evo: LiquidJS template for the line pinned above the note strip; "" for none. */
+    readerNoteStripBanner: string;
+    /**
+     * ZotFlow Evo: text put before and after a comment dragged from the note
+     * strip into a note, per annotation colour (lower-case hex, e.g. "#ffd400").
+     */
+    evoCommentDrop: Record<string, EvoDropAffixes>;
+    /**
+     * ZotFlow Evo: LiquidJS template for a highlight (or selected text)
+     * dragged from the reader into a note; "" keeps the default citation format.
+     */
+    evoHighlightDropTemplate: string;
+    /** ZotFlow Evo: sync a library as soon as Zotero reports a change to it. */
+    autoSyncPull: boolean;
+    /** ZotFlow Evo: sync shortly after something was changed here. */
+    autoSyncPush: boolean;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -90,6 +112,24 @@ export interface ZotFlowSettings {
     /** Vault-relative folder scanned for custom .csl styles; "" disables. */
     cslStylesFolder: string;
 }
+
+/** ZotFlow Evo: text around a comment dropped into a note. */
+export interface EvoDropAffixes {
+    before: string;
+    after: string;
+}
+
+/** ZotFlow Evo: default line above the note strip — author, year, title, publication, book. */
+export const DEFAULT_NOTE_STRIP_BANNER =
+    "{{ item.creatorSummary | default: item.creators[0].lastName | default: item.creators[0].name }}{% if item.year %} {{ item.year }}{% endif %} · {{ item.title }}{% if item.publicationTitle %} · {{ item.publicationTitle }}{% endif %}{% if item.bookTitle %} · {{ item.bookTitle }}{% endif %}";
+
+/**
+ * ZotFlow Evo: default text for a highlight dropped into a note — the
+ * highlighted text, then author, year, title and page in brackets, linked to
+ * the place in the PDF.
+ */
+export const DEFAULT_HIGHLIGHT_DROP_TEMPLATE =
+    '{{ text }} ([{{ item.creatorSummary | default: item.creators[0].lastName | default: item.creators[0].name }}{% if item.year %} {{ item.year }}{% endif %}, {{ item.title | replace: "[", "(" | replace: "]", ")" }}, p. {{ page }}]({{ link }}))';
 
 /** Top-level key addressable by Obsidian's declarative settings controls. */
 export type SettingKey = Extract<keyof ZotFlowSettings, string>;
@@ -164,6 +204,14 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     epubFontFamily: "",
     readerToolbarHidden: false,
     readerCommentPopupSuppressed: false,
+    readerNoteStripVisible: true,
+    readerNoteStripCollapsed: false,
+    readerNoteStripWidth: 320,
+    readerNoteStripBanner: DEFAULT_NOTE_STRIP_BANNER,
+    evoCommentDrop: {},
+    evoHighlightDropTemplate: DEFAULT_HIGHLIGHT_DROP_TEMPLATE,
+    autoSyncPull: true,
+    autoSyncPush: true,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

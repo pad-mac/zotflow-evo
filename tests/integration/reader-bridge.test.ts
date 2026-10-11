@@ -1045,4 +1045,37 @@ describe("ZotFlow Evo: reader chrome", () => {
         expect(replayed.toolbarHidden).toBe(true);
         expect(replayed.annotationPopupSuppressed).toBe(true);
     });
+
+    it("sends note strip changes once the reader is open and replays them merged", async () => {
+        const h = harness();
+        await h.completeHandshake();
+        // Before the reader is open the change waits.
+        const early = h.bridge.setNoteStrip({ collapsed: true });
+        expect(h.child.setNoteStrip).not.toHaveBeenCalled();
+
+        await h.bridge.initReader(
+            makeReaderOptions({
+                annotations: [],
+                noteStrip: { visible: true, collapsed: false, width: 320 },
+            }),
+        );
+        await early;
+        expect(h.child.setNoteStrip).toHaveBeenCalledWith({ collapsed: true });
+
+        await h.bridge.setNoteStrip({ banner: "Doe 2024 · A title" });
+        await h.bridge.setNoteStrip({ visible: false });
+
+        h.reparent();
+        await vi.waitFor(() => expect(h.iframes).toHaveLength(2));
+        await h.register();
+        await vi.waitFor(() => expect(h.bridge.state).toBe("reader-ready"));
+
+        const replayed = h.child.initReader.mock.calls[1]![0];
+        expect(replayed.noteStrip).toEqual({
+            visible: false,
+            collapsed: false,
+            width: 320,
+            banner: "Doe 2024 · A title",
+        });
+    });
 });

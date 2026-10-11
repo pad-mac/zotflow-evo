@@ -384,9 +384,10 @@ export class WorkerBridge {
     /*  Task factory methods (delegates to top-level WorkerAPI methods) */
     /* ================================================================ */
 
-    async createSyncTask(libraryId?: number): Promise<string> {
+    /** `quiet` (ZotFlow Evo): an automatic sync, which reports failures only. */
+    async createSyncTask(libraryId?: number, quiet?: boolean): Promise<string> {
         this.assertInitialized();
-        return this._api.createSyncTask(libraryId);
+        return this._api.createSyncTask(libraryId, quiet);
     }
 
     async createBatchNoteTask(

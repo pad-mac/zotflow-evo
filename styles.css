@@ -3806,3 +3806,20 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
         max-height: 140px;
     }
 }
+
+/* ZotFlow Evo (fork): settings page */
+.zotflow-evo-swatch {
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    margin-inline-end: 0.5em;
+    border-radius: 50%;
+    background-color: var(--zotflow-evo-swatch);
+}
+
+.zotflow-evo-wide-input {
+    width: 100%;
+    min-width: 18em;
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-smaller);
+}

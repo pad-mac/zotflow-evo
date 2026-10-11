@@ -92,6 +92,8 @@ export class TaskManager {
         libraryId?: number,
         libraryNoteService?: LibraryNoteService,
         settings?: ZotFlowSettings,
+        // ZotFlow Evo: an automatic sync reports failures only.
+        quiet = false,
     ) {
         const scope: number | "all" = libraryId ?? "all";
         const existing = this.activeSyncs.get(scope);
@@ -112,6 +114,7 @@ export class TaskManager {
             this,
             libraryNoteService,
             settings,
+            quiet,
         );
         this.activeSyncs.set(scope, task.id);
 

@@ -6,6 +6,8 @@ import type {
     ChildEvents,
     AnnotationJSON,
     ReaderNavigation,
+    ReaderDragExtra,
+    ReaderNoteStrip,
 } from "types/zotero-reader";
 
 import { EditorView } from "@codemirror/view";
@@ -29,6 +31,7 @@ import {
     stripAnnotationForPayload,
     type ZotFlowCitationPayload,
 } from "ui/editor/citation-helper";
+import { plainCommentDrop } from "ui/editor/evo-drop";
 import {
     createEmbeddableMarkdownEditor,
     EmbeddableMarkdownEditor,
@@ -286,6 +289,7 @@ export class IframeReaderBridge {
                 dataTransfer: DataTransfer,
                 annotations: AnnotationJSON[],
                 fromText?: boolean,
+                extra?: ReaderDragExtra,
             ) => {
                 if (fromText) {
                     dataTransfer.setData(
@@ -310,6 +314,8 @@ export class IframeReaderBridge {
                         type: "zotflow-citation",
                         libraryID,
                         key: parentKey,
+                        // ZotFlow Evo: dropped with the reader drop templates.
+                        evoSource: extra?.evoSource ?? "highlight",
                         // The reader strips `libraryID`/`parentItem` from
                         // annotations during drag, so restore them from the
                         // attachment for annotation-link generation and the
@@ -324,6 +330,16 @@ export class IframeReaderBridge {
                         ZOTFLOW_CITATION_MIME,
                         JSON.stringify(payload),
                     );
+                }
+
+                // ZotFlow Evo: outside a markdown editor (or in the local
+                // reader) a comment dragged from the note strip drops as its text.
+                if (extra?.evoSource === "comment") {
+                    dataTransfer.setData(
+                        "text/plain",
+                        plainCommentDrop(annotations),
+                    );
+                    return;
                 }
 
                 // text/plain fallback: embed links if source note exists
@@ -777,6 +793,16 @@ export class IframeReaderBridge {
         this.updateReaderOpts({ annotationPopupSuppressed: suppressed });
         return this.runAfterBridgeReady(async () => {
             await this.child!.setAnnotationPopupSuppressed(suppressed);
+        });
+    }
+
+    /** ZotFlow Evo: change the note strip beside the PDF (any subset of its settings). */
+    setNoteStrip(settings: ReaderNoteStrip) {
+        this.updateReaderOpts({
+            noteStrip: { ...this._readerOpts?.noteStrip, ...settings },
+        });
+        return this.runAfterReaderReady(async () => {
+            await this.child!.setNoteStrip(settings);
         });
     }
 

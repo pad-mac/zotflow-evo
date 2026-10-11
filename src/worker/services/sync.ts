@@ -178,6 +178,8 @@ export class SyncService {
         signal?: AbortSignal,
         onProgress?: (completed: number, total: number, message: string) => void,
         libraryId?: number,
+        // ZotFlow Evo: an automatic sync reports failures only.
+        options: { quiet?: boolean } = {},
     ): Promise<{
         successCount: number;
         failCount: number;
@@ -274,7 +276,7 @@ export class SyncService {
             onProgress?.(totalLibs, totalLibs, "Sync completed");
 
             if (failCount === 0) {
-                this.parentHost.notify("success", "Sync completed successfully!");
+                if (!options.quiet) this.parentHost.notify("success", "Sync completed successfully!");
             } else {
                 this.parentHost.notify("info", `Sync finished with ${failCount} errors.`);
             }

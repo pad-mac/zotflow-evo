@@ -37,6 +37,25 @@ export interface CreateReaderOptions {
     toolbarHidden?: boolean;
     /** ZotFlow Evo: do not open the comment popup next to annotations. */
     annotationPopupSuppressed?: boolean;
+    /** ZotFlow Evo: the note strip beside a PDF. */
+    noteStrip?: ReaderNoteStrip;
+}
+
+/** ZotFlow Evo: settings of the note strip beside a PDF. */
+export interface ReaderNoteStrip {
+    visible?: boolean;
+    /** List mode: comments one below the other, not beside their place on the page. */
+    collapsed?: boolean;
+    /** Width in pixels. */
+    width?: number;
+    /** One line of text pinned above the strip; "" for none. */
+    banner?: string;
+}
+
+/** ZotFlow Evo: what else the reader says about a drag it starts. */
+export interface ReaderDragExtra {
+    /** "comment": a comment dragged out of the note strip. */
+    evoSource?: "comment";
 }
 
 /** Discriminated union of all events the reader iframe can emit to the parent. */
@@ -116,6 +135,8 @@ export type ParentAPI = {
         dataTransfer: DataTransfer,
         annotations: AnnotationJSON[],
         fromText?: boolean,
+        /** ZotFlow Evo */
+        extra?: ReaderDragExtra,
     ) => void;
     copyAnnotationCitation: (
         annotations: AnnotationJSON[],
@@ -152,6 +173,8 @@ export type ChildAPI = {
     setToolbarHidden: (hidden: boolean) => Promise<boolean>;
     /** ZotFlow Evo */
     setAnnotationPopupSuppressed: (suppressed: boolean) => Promise<boolean>;
+    /** ZotFlow Evo */
+    setNoteStrip: (settings: ReaderNoteStrip) => Promise<boolean>;
     destroy: () => Promise<boolean>;
 };
 

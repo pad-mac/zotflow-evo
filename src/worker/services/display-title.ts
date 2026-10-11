@@ -145,6 +145,34 @@ export class DisplayTitleService {
     }
 
     /**
+     * ZotFlow Evo: render any one-off template for an item with the variables
+     * a display-title template sees (`item`), plus `extra` at the root. Used
+     * for the banner above the reader's note strip and for the text a
+     * highlight dragged out of the reader is dropped as. Throws on a
+     * template error; the callers have their own fallbacks.
+     */
+    async renderTemplate(
+        libraryID: number,
+        key: string,
+        source: string,
+        extra: Record<string, unknown> = {},
+    ): Promise<string> {
+        const item = await db.items.get([libraryID, key]);
+        if (!item) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.RESOURCE_MISSING,
+                "DisplayTitleService",
+                `Item not found: ${libraryID}/${key}`,
+            );
+        }
+        const out: unknown = await this.engine.parseAndRender(source, {
+            ...displayTitleScope(item),
+            ...extra,
+        });
+        return typeof out === "string" ? out : "";
+    }
+
+    /**
      * Name fields for a search record: the display title, plus the Zotero
      * title as an alias when the display title does not already contain it,
      * so a `{{ item.citationKey }}` template still finds items by title.

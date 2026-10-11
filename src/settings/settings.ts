@@ -3,6 +3,7 @@ import { App, PluginSettingTab } from "obsidian";
 import { CacheSection } from "settings/sections/cache-section";
 import { CitationSection } from "settings/sections/citation-section";
 import { CslSection } from "settings/sections/csl-section";
+import { EvoSection } from "settings/sections/evo-section";
 import { GeneralSection } from "settings/sections/general-section";
 import { SyncSection } from "settings/sections/sync-section";
 import { WebDavSection } from "settings/sections/webdav-section";
@@ -62,6 +63,13 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 type: "page",
                 name: "CSL Render",
                 items: new CslSection(this.plugin).getDefinitions(),
+            },
+            // ZotFlow Evo: the fork's own settings.
+            {
+                type: "page",
+                name: "ZotFlow Evo",
+                desc: "Note strip beside PDFs, dragging comments and highlights into notes, automatic sync.",
+                items: new EvoSection(this.plugin).getDefinitions(),
             },
         ];
     }

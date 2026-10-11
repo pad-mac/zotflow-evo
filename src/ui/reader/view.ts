@@ -30,7 +30,10 @@ import {
     attachReaderChromeControls,
     readerChromeOptions,
     requestReaderThemeRefresh,
+    sendNoteStripBanner,
 } from "ui/reader/chrome";
+import type { NoteStripSubject } from "ui/reader/chrome";
+import { noteLocalEdit } from "services/evo-auto-sync";
 import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
 /** View type identifier for the Zotero cloud reader view. */
@@ -80,8 +83,23 @@ export class ZoteroReaderView extends ItemView {
             "Open source note",
             this.handleOpenSourceNote.bind(this),
         );
-        // ZotFlow Evo: toolbar and comment popup toggles.
-        attachReaderChromeControls(this, () => this.bridge);
+        // ZotFlow Evo: toolbar, comment popup and note strip toggles.
+        attachReaderChromeControls(
+            this,
+            () => this.bridge,
+            () => this.noteStripSubject(),
+        );
+    }
+
+    /** ZotFlow Evo: the item the line above the note strip describes. */
+    private noteStripSubject(): NoteStripSubject | undefined {
+        const attachment = this.attachmentItem;
+        if (!attachment) return undefined;
+        return {
+            libraryID: attachment.libraryID,
+            key: attachment.parentItem || attachment.key,
+            fallback: this.getDisplayText(),
+        };
     }
 
     /**
@@ -599,6 +617,9 @@ export class ZoteroReaderView extends ItemView {
             readerInitialized = true;
             if (superseded()) return;
 
+            // ZotFlow Evo: the line above the note strip.
+            sendNoteStripBanner(this.bridge, this.noteStripSubject());
+
             // Subscribe to sync events for live annotation updates
             this.subscribeToSyncEvents();
             this.subscribeToAnnotationChanges();
@@ -903,6 +924,9 @@ export class ZoteroReaderView extends ItemView {
             );
         }
 
+        // ZotFlow Evo: upload shortly after the last change.
+        if (annotations.length) noteLocalEdit(this.attachmentItem.libraryID);
+
         // Auto-copy newly created annotations (creation only — skips edits).
         const created = annotations.filter(
             (a) => !this.knownAnnotationIds.has(a.id),
@@ -948,6 +972,8 @@ export class ZoteroReaderView extends ItemView {
                 "Failed to delete annotations",
             );
         }
+        // ZotFlow Evo: upload shortly after the last change.
+        if (ids.length) noteLocalEdit(this.attachmentItem.libraryID);
     }
 
     /**

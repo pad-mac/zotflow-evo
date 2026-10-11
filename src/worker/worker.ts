@@ -89,7 +89,8 @@ export interface WorkerAPI {
     updateSettings(settings: ZotFlowSettings): void;
 
     // Task factory methods
-    createSyncTask(libraryId?: number): Promise<string>;
+    /** `quiet` (ZotFlow Evo): an automatic sync, which reports failures only. */
+    createSyncTask(libraryId?: number, quiet?: boolean): Promise<string>;
     createBatchNoteTask(
         input: BatchNoteInput,
         options: UpdateOptions,
@@ -619,7 +620,7 @@ const exposedApi: WorkerAPI = {
     /*  Task factory methods                                           */
     /* ================================================================ */
 
-    createSyncTask: async (libraryId?: number) => {
+    createSyncTask: async (libraryId?: number, quiet?: boolean) => {
         assertInitialized();
         // The sync uploads the edits still waiting, not the text before them.
         await _editQueue!.flushAll();
@@ -628,6 +629,7 @@ const exposedApi: WorkerAPI = {
             libraryId,
             _libraryNote,
             _currentSettings,
+            quiet,
         );
     },
 

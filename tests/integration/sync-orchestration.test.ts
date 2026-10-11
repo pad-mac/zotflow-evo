@@ -177,6 +177,34 @@ describe("progress and notices", () => {
         });
     });
 
+    // ZotFlow Evo: automatic syncs.
+    test("a quiet run does not announce success", async () => {
+        h = await createSyncHarness();
+        const result = await h.sync.startSync(undefined, undefined, undefined, {
+            quiet: true,
+        });
+
+        expect(result.successCount).toBe(1);
+        expect(h.host.notices.filter((n) => n.type === "success")).toEqual([]);
+    });
+
+    // ZotFlow Evo: automatic syncs.
+    test("a quiet run still reports a failing library", async () => {
+        h = await createSyncHarness();
+        h.server.failNext({ status: 500, pathIncludes: "/users/1" });
+
+        const result = await h.sync.startSync(undefined, undefined, undefined, {
+            quiet: true,
+        });
+
+        expect(result.failCount).toBe(1);
+        expect(
+            h.host.notices.some(
+                (n) => n.type === "error" && /Sync Failed/.test(n.message),
+            ),
+        ).toBe(true);
+    });
+
     test("a failing library is counted, notified, and does not stop the others", async () => {
         h = await createSyncHarness({ groups: [{ id: GROUP_ID }] });
         h.server.library(GROUP_ID, "group").addItem({ key: "GRUPITEM" });

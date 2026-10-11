@@ -549,3 +549,79 @@ describe("tree view", () => {
         expect(payload.entities.ARTICLE1?.name).toBe("2017");
     });
 });
+
+/* ------------------------------------------------------------------ */
+/*  ZotFlow Evo: one-off templates                                    */
+/* ------------------------------------------------------------------ */
+
+describe("ZotFlow Evo: renderTemplate", () => {
+    beforeEach(async () => {
+        await createServiceHarness();
+    });
+
+    test("renders any template with the item's variables, whatever the display-title template is", async () => {
+        await article("ARTICLE1", {}, { publicationTitle: "NeurIPS" });
+        const titles = service("{{ item.year }}");
+
+        const out = await titles.renderTemplate(
+            USER_ID,
+            "ARTICLE1",
+            "{{ item.creators[0].lastName }} {{ item.year }} · {{ item.title }}{% if item.publicationTitle %} · {{ item.publicationTitle }}{% endif %}{% if item.bookTitle %} · {{ item.bookTitle }}{% endif %}",
+        );
+
+        expect(out).toBe("Vaswani 2017 · Attention Is All You Need · NeurIPS");
+    });
+
+    test("extra variables sit beside `item`", async () => {
+        await article();
+        const out = await service("").renderTemplate(
+            USER_ID,
+            "ARTICLE1",
+            "{{ text }} ([{{ item.title }}, p. {{ page }}]({{ link }}))",
+            { text: "quoted", page: "5", link: "obsidian://x" },
+        );
+
+        expect(out).toBe("quoted ([Attention Is All You Need, p. 5](obsidian://x))");
+    });
+
+    test("the default banner and highlight templates render", async () => {
+        const { DEFAULT_HIGHLIGHT_DROP_TEMPLATE, DEFAULT_NOTE_STRIP_BANNER } =
+            await import("settings/types");
+        await article("ARTICLE1", { title: "A [bracketed] title" }, {
+            title: "A [bracketed] title",
+            publicationTitle: "NeurIPS",
+        });
+        const titles = service("");
+
+        expect(
+            await titles.renderTemplate(USER_ID, "ARTICLE1", DEFAULT_NOTE_STRIP_BANNER),
+        ).toBe("Vaswani 2017 · A [bracketed] title · NeurIPS");
+        // Square brackets in a title would end the link text early.
+        expect(
+            await titles.renderTemplate(USER_ID, "ARTICLE1", DEFAULT_HIGHLIGHT_DROP_TEMPLATE, {
+                text: "quoted",
+                page: "5",
+                link: "obsidian://x",
+            }),
+        ).toBe("quoted ([Vaswani 2017, A (bracketed) title, p. 5](obsidian://x))");
+    });
+
+    test("the defaults prefer Zotero's own author summary", async () => {
+        const { DEFAULT_NOTE_STRIP_BANNER } = await import("settings/types");
+        const item = await article();
+        await db.items.update([USER_ID, item.key], {
+            raw: { ...item.raw, meta: { creatorSummary: "Vaswani et al." } },
+        } as any);
+
+        expect(
+            await service("").renderTemplate(USER_ID, "ARTICLE1", DEFAULT_NOTE_STRIP_BANNER),
+        ).toBe("Vaswani et al. 2017 · Attention Is All You Need");
+    });
+
+    test("a missing item and a broken template both reject", async () => {
+        await article();
+        const titles = service("");
+        await expect(titles.renderTemplate(USER_ID, "NOSUCH01", "x")).rejects.toThrow(/not found/i);
+        await expect(titles.renderTemplate(USER_ID, "ARTICLE1", "{% if %}")).rejects.toThrow();
+    });
+});
