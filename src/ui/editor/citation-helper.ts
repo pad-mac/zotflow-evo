@@ -1,5 +1,6 @@
 import { services } from "services/services";
 import { handleReaderDrop } from "ui/editor/evo-drop";
+import { handleSourceLinkDrop } from "ui/editor/evo-link-drop";
 
 import type {
     Editor,
@@ -219,6 +220,10 @@ export function handleEditorDrop(
     info: MarkdownView | MarkdownFileInfo,
 ): void {
     if (evt.defaultPrevented) return;
+
+    // ZotFlow Evo: items dragged out of the library browser are dropped as
+    // links to their source notes; a modifier key keeps the formats below.
+    if (handleSourceLinkDrop(evt, editor, info)) return;
 
     const raw = evt.dataTransfer?.getData(ZOTFLOW_CITATION_MIME);
     if (!raw) return;

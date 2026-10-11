@@ -131,3 +131,11 @@ export const MarkdownRenderer = {
         MarkdownRenderer.calls.length = 0;
     },
 };
+
+/** ZotFlow Evo: Obsidian's `parseLinktext`, enough for links without aliases. */
+export function parseLinktext(linktext: string): { path: string; subpath: string } {
+    const at = linktext.indexOf("#");
+    return at === -1
+        ? { path: linktext, subpath: "" }
+        : { path: linktext.slice(0, at), subpath: linktext.slice(at) };
+}

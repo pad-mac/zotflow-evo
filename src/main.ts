@@ -31,6 +31,7 @@ import { handleEditorDrop } from "ui/editor/citation-helper";
 import { startSync } from "ui/start-sync";
 import { registerReaderChromeCommands } from "ui/reader/chrome";
 import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
+import { registerSourceNoteLinks } from "ui/evo-source-links";
 import {
     refreshEvoAutoSync,
     startEvoAutoSync,
@@ -302,6 +303,8 @@ export default class ZotFlow extends Plugin {
         // the library browser tab.
         registerReaderChromeCommands(this);
         registerEvoWorkspaceCommands(this);
+        // ZotFlow Evo: a click on a link to a source note opens the PDF.
+        registerSourceNoteLinks(this);
 
         this.addCommand({
             id: "open-tree-view",

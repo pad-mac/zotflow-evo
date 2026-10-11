@@ -2,12 +2,15 @@
  * ZotFlow Evo (fork): what a comment or a highlight dragged out of the
  * reader becomes when it is dropped into a note.
  *
- * - A comment dragged from the note strip is dropped as its text, with the
- *   text the settings give for the annotation's colour before and after it,
- *   and a page number linked to the place in the PDF.
- * - A highlight (or selected text) dragged from the page is dropped through
- *   the highlight drop template: by default its text, then author, year,
- *   title and page in brackets, linked the same way.
+ *   before + body + " " + reference + after
+ *
+ * - `body` is the highlighted text in quotation marks (a highlight or
+ *   selected text dragged from the page) or the comment (dragged from the
+ *   note strip).
+ * - `reference` is one template for both (settings): by default author,
+ *   year, short title and page in brackets, linked to the place in the PDF.
+ * - `before` and `after` are set per annotation colour, in one table for
+ *   highlights and one for comments.
  *
  * A drop with a modifier key held is left to the citation formats of
  * `citation-helper.ts`. See FORK.md.
@@ -31,12 +34,23 @@ export const ANNOTATION_COLORS: readonly { name: string; hex: string }[] = [
     { name: "Gray", hex: "#aaaaaa" },
 ];
 
-/** Added after a comment when neither affix places the link itself. */
-const DEFAULT_PAGE_LINK = " [p. {{page}}]({{link}})";
+/** Opening and closing mark around dropped highlight text. */
+const QUOTE_OPEN = "“";
+const QUOTE_CLOSE = "”";
 
 const EMPTY_AFFIXES: EvoDropAffixes = { before: "", after: "" };
 
-/** The text the settings put around a comment of this colour. */
+/** What an affix can refer to. */
+const AFFIX_FIELDS = ["cite", "page", "link", "text", "comment", "color"] as const;
+type AffixField = (typeof AFFIX_FIELDS)[number];
+const AFFIX_PATTERN = new RegExp(
+    `\\{\\{\\s*(${AFFIX_FIELDS.join("|")})\\s*\\}\\}`,
+    "g",
+);
+/** An affix that places the reference (or the bare link) itself. */
+const PLACES_REFERENCE = /\{\{\s*(?:cite|link)\s*\}\}/;
+
+/** The text the settings put around a drop of this colour. */
 export function affixesForColor(
     table: Record<string, EvoDropAffixes> | undefined,
     color: string | undefined,
@@ -63,36 +77,49 @@ export function readerLink(annotation: AnnotationJSON): string {
     return `obsidian://zotflow?type=open-attachment&libraryID=${libraryID}&key=${annotation.parentItem ?? ""}&navigation=${navigation}`;
 }
 
-/** Fill `{{page}}`, `{{link}}`, `{{text}}` and `{{color}}` in an affix. */
-function fillAffix(affix: string, annotation: AnnotationJSON): string {
-    const values: Record<string, string> = {
+/**
+ * One drop, put together.
+ *
+ * @param source What was dragged: the highlight itself, or its comment.
+ * @param reference The rendered reference template.
+ * @param affixes The text set for the annotation's colour. `{{cite}}`,
+ *   `{{page}}`, `{{link}}`, `{{text}}`, `{{comment}}` and `{{color}}` are
+ *   filled in; an affix that places `{{cite}}` or `{{link}}` itself keeps the
+ *   reference from being added after the body.
+ */
+export function composeDrop(
+    source: "highlight" | "comment",
+    annotation: AnnotationJSON,
+    reference: string,
+    affixes: EvoDropAffixes,
+): string {
+    const text = (annotation.text ?? "").trim();
+    const comment = (annotation.comment ?? "").trim();
+    const values: Record<AffixField, string> = {
+        cite: reference,
         page: annotation.pageLabel ?? "",
         link: readerLink(annotation),
-        text: annotation.text ?? "",
+        text,
+        comment,
         color: annotation.color ?? "",
     };
-    return affix.replace(
-        /\{\{\s*(page|link|text|color)\s*\}\}/g,
-        (_match, name: string) => values[name] ?? "",
-    );
-}
+    const fill = (affix: string) =>
+        affix.replace(AFFIX_PATTERN, (_match, name: AffixField) => values[name]);
 
-/**
- * One comment as it is dropped into a note. The linked page number follows
- * the comment unless an affix places `{{link}}` itself.
- */
-export function formatCommentDrop(
-    annotation: AnnotationJSON,
-    table: Record<string, EvoDropAffixes> | undefined,
-): string {
-    const { before, after } = affixesForColor(table, annotation.color);
-    const placesLink = /\{\{\s*link\s*\}\}/.test(before + after);
-    const comment = (annotation.comment ?? "").trim();
+    let body = comment;
+    if (source === "highlight") {
+        // An image or ink annotation has no text to quote.
+        body = text ? QUOTE_OPEN + text + QUOTE_CLOSE : "";
+    }
+    const placesReference = PLACES_REFERENCE.test(
+        affixes.before + affixes.after,
+    );
+    const parts = [body];
+    if (!placesReference && reference) parts.push(reference);
     return (
-        fillAffix(before, annotation) +
-        comment +
-        (placesLink ? "" : fillAffix(DEFAULT_PAGE_LINK, annotation)) +
-        fillAffix(after, annotation)
+        fill(affixes.before) +
+        parts.filter(Boolean).join(" ") +
+        fill(affixes.after)
     );
 }
 
@@ -107,15 +134,16 @@ export function plainCommentDrop(annotations: AnnotationJSON[]): string {
         .join("\n");
 }
 
-async function formatHighlightDrop(
+async function renderReference(
     payload: ZotFlowCitationPayload,
     annotation: AnnotationJSON,
     template: string,
 ): Promise<string> {
+    if (!template.trim()) return "";
     // Imported late: `citation-helper.ts`, which calls into this module, is
     // also loaded where the worker bridge is not (its unit tests).
     const { workerBridge } = await import("bridge");
-    return workerBridge.displayTitle.renderTemplate(
+    const out = await workerBridge.displayTitle.renderTemplate(
         payload.libraryID,
         payload.key,
         template,
@@ -128,25 +156,39 @@ async function formatHighlightDrop(
             annotation,
         },
     );
+    return out.trim();
 }
 
 async function resolveReaderDrop(
     payload: ZotFlowCitationPayload,
 ): Promise<string> {
-    const annotations = payload.annotations ?? [];
-    if (payload.evoSource === "comment") {
-        const table = services.settings.evoCommentDrop;
-        return annotations
-            .filter((annotation) => (annotation.comment ?? "").trim())
-            .map((annotation) => formatCommentDrop(annotation, table))
-            .join("\n");
+    const source = payload.evoSource === "comment" ? "comment" : "highlight";
+    const settings = services.settings;
+    const table =
+        source === "comment"
+            ? settings.evoCommentDrop
+            : settings.evoHighlightDrop;
+    const lines: string[] = [];
+    for (const annotation of payload.annotations ?? []) {
+        // A comment drag of an annotation without a comment drops nothing.
+        if (source === "comment" && !(annotation.comment ?? "").trim()) {
+            continue;
+        }
+        const reference = await renderReference(
+            payload,
+            annotation,
+            settings.evoDropLinkTemplate,
+        );
+        lines.push(
+            composeDrop(
+                source,
+                annotation,
+                reference,
+                affixesForColor(table, annotation.color),
+            ),
+        );
     }
-    const template = services.settings.evoHighlightDropTemplate;
-    const parts: string[] = [];
-    for (const annotation of annotations) {
-        parts.push(await formatHighlightDrop(payload, annotation, template));
-    }
-    return parts.join("\n");
+    return lines.filter(Boolean).join("\n");
 }
 
 /**
@@ -161,19 +203,13 @@ export function handleReaderDrop(
 ): boolean {
     if (!payload.evoSource || !payload.annotations?.length) return false;
     if (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey) return false;
-    if (
-        payload.evoSource === "highlight" &&
-        !services.settings.evoHighlightDropTemplate.trim()
-    ) {
-        return false;
-    }
 
     const pos = editor.getCursor();
     const baselineDoc = editor.getValue();
     resolveReaderDrop(payload)
         .then((text) => {
             if (!text) return;
-            // The template rendered in the worker; if the note changed in
+            // The reference rendered in the worker; if the note changed in
             // the meantime, insert where the cursor is now.
             const at = editor.getValue() === baselineDoc ? pos : editor.getCursor();
             const offset = editor.posToOffset(at);
@@ -188,7 +224,7 @@ export function handleReaderDrop(
             );
             services.notificationService.notify(
                 "error",
-                "Could not insert the dropped text. Check the drop template in the settings.",
+                "Could not insert the dropped text. Check the reference template in the settings.",
             );
         });
     return true;

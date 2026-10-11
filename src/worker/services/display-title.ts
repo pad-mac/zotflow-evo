@@ -146,7 +146,8 @@ export class DisplayTitleService {
 
     /**
      * ZotFlow Evo: render any one-off template for an item with the variables
-     * a display-title template sees (`item`), plus `extra` at the root. Used
+     * a display-title template sees (`item`), the shortcuts `author`, `year`,
+     * `shortTitle` and `title`, plus `extra` at the root. Used
      * for the banner above the reader's note strip and for the text a
      * highlight dragged out of the reader is dropped as. Throws on a
      * template error; the callers have their own fallbacks.
@@ -165,8 +166,10 @@ export class DisplayTitleService {
                 `Item not found: ${libraryID}/${key}`,
             );
         }
+        const scope = displayTitleScope(item);
         const out: unknown = await this.engine.parseAndRender(source, {
-            ...displayTitleScope(item),
+            ...scope,
+            ...referenceShortcuts(scope.item),
             ...extra,
         });
         return typeof out === "string" ? out : "";
@@ -330,6 +333,42 @@ function displayTitleScope(item: AnyIDBZoteroItem): Record<string, unknown> {
             tags: item.raw?.data?.tags || [],
             ...attachmentFields(item),
         },
+    };
+}
+
+/**
+ * ZotFlow Evo: what a short reference to an item is made of, ready to be
+ * the text of a markdown link: Zotero's author summary (else the first
+ * author), the year, the short title (else the title). Square brackets
+ * would end a link's text early, so they become round ones.
+ */
+function referenceShortcuts(item: unknown): Record<string, string | undefined> {
+    const fields = (item ?? {}) as {
+        creatorSummary?: string;
+        creators?: { lastName?: string; name?: string }[];
+        year?: unknown;
+        shortTitle?: unknown;
+        title?: unknown;
+    };
+    const text = (value: unknown) =>
+        (typeof value === "string" || typeof value === "number"
+            ? String(value)
+            : ""
+        )
+            .replace(/\[/g, "(")
+            .replace(/\]/g, ")")
+            .trim();
+    const first = fields.creators?.[0];
+    const title = text(fields.title);
+    // Missing ones are left undefined: to a template an empty string is
+    // "there" (`{% if author %}` would hold), an undefined variable is not.
+    return {
+        author:
+            text(fields.creatorSummary || first?.lastName || first?.name) ||
+            undefined,
+        year: text(fields.year) || undefined,
+        title: title || undefined,
+        shortTitle: text(fields.shortTitle) || title || undefined,
     };
 }
 

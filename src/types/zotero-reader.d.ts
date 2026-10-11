@@ -35,10 +35,13 @@ export interface CreateReaderOptions {
     fontFamily?: string;
     /** ZotFlow Evo: start with the reader toolbar hidden. */
     toolbarHidden?: boolean;
-    /** ZotFlow Evo: do not open the comment popup next to annotations. */
-    annotationPopupSuppressed?: boolean;
     /** ZotFlow Evo: the note strip beside a PDF. */
     noteStrip?: ReaderNoteStrip;
+    /**
+     * Where the document opens, instead of where it was last read (Zotero's
+     * own option; ZotFlow Evo passes it for links into a PDF that is not open yet).
+     */
+    location?: ReaderNavigation;
 }
 
 /** ZotFlow Evo: settings of the note strip beside a PDF. */
@@ -50,6 +53,8 @@ export interface ReaderNoteStrip {
     width?: number;
     /** One line of text pinned above the strip; "" for none. */
     banner?: string;
+    /** List the highlights themselves too, not only comments. */
+    highlights?: boolean;
 }
 
 /** ZotFlow Evo: what else the reader says about a drag it starts. */
@@ -65,6 +70,8 @@ export type ChildEvents =
     | { type: "annotationsSaved"; annotations: AnnotationJSON[] }
     | { type: "annotationsDeleted"; ids: string[] }
     | { type: "viewStateChanged"; state: unknown; primary: boolean }
+    /** ZotFlow Evo: a note strip setting was changed in the strip itself. */
+    | { type: "noteStripChanged"; settings: ReaderNoteStrip }
     | {
           type: "openTagsPopup";
           annotationID: unknown;
@@ -171,8 +178,6 @@ export type ChildAPI = {
     navigate: (navigationInfo: ReaderNavigation) => Promise<boolean>;
     /** ZotFlow Evo */
     setToolbarHidden: (hidden: boolean) => Promise<boolean>;
-    /** ZotFlow Evo */
-    setAnnotationPopupSuppressed: (suppressed: boolean) => Promise<boolean>;
     /** ZotFlow Evo */
     setNoteStrip: (settings: ReaderNoteStrip) => Promise<boolean>;
     destroy: () => Promise<boolean>;

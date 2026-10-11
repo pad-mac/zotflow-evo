@@ -29,6 +29,8 @@ import { splitHighlight } from "utils/search-query";
 import {
     isLibraryBrowserTab,
     openItemPrimaryAttachment,
+    selectBrowserNode,
+    setSourceLinkDrag,
 } from "ui/tree-view/evo-browser";
 
 /** Pixel indentation per tree depth level. */
@@ -146,9 +148,26 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
 
     // The setting is read at event time so toggling it applies live.
     const handleOnClick = (e: React.MouseEvent) => {
-        // ZotFlow Evo: in the library browser tab a click opens the item's
-        // PDF, EPUB or snapshot (asking when there are several).
+        // ZotFlow Evo: in the library browser tab a click selects the item
+        // (Ctrl/Cmd and Shift select several); a double click opens it.
         if (nodeType === "item" && isLibraryBrowserTab(e.currentTarget)) {
+            // The tree's own click handling would select this one alone.
+            e.stopPropagation();
+            selectBrowserNode(node, e);
+            return;
+        }
+        if (!services.settings.treeSingleClickOpen) {
+            node.toggle();
+            return;
+        }
+        openPrimaryTarget();
+    };
+
+    const handleDoubleClick = (e: React.MouseEvent) => {
+        // ZotFlow Evo: in the library browser tab a double click opens the
+        // item's PDF, EPUB or snapshot (asking when there are several).
+        if (nodeType === "item" && isLibraryBrowserTab(e.currentTarget)) {
+            e.stopPropagation();
             if (
                 isTopLevelItem &&
                 node.data.itemType !== "attachment" &&
@@ -174,16 +193,6 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
             }
             return;
         }
-        if (!services.settings.treeSingleClickOpen) {
-            node.toggle();
-            return;
-        }
-        openPrimaryTarget();
-    };
-
-    const handleDoubleClick = (e: React.MouseEvent) => {
-        // ZotFlow Evo: the single click has already opened it.
-        if (nodeType === "item" && isLibraryBrowserTab(e.currentTarget)) return;
         if (services.settings.treeSingleClickOpen) return;
         e.stopPropagation();
         node.toggle();
@@ -634,6 +643,11 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
         const isCitationDrag =
             nodeType === "item" && node.data.itemType !== "attachment";
         let plainText = node.data.name || "Untitled";
+        // ZotFlow Evo: from the library browser tab, items are dropped as
+        // links to their source notes (every selected item, if this is one).
+        const sourceLinks = isLibraryBrowserTab(e.currentTarget)
+            ? setSourceLinkDrag(e.dataTransfer, node)
+            : 0;
 
         if (node.data.itemType === "attachment") {
             const url = `obsidian://zotflow?type=open-attachment&libraryID=${node.data.libraryID}&key=${node.data.key}`;
@@ -669,9 +683,15 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
 
         const action = createDiv();
         action.addClass("drag-ghost-action");
-        action.textContent = isCitationDrag
-            ? "Insert citation here"
-            : "Insert link here";
+        if (sourceLinks > 1) {
+            action.textContent = `Insert ${sourceLinks} links here`;
+        } else if (sourceLinks === 1) {
+            action.textContent = "Insert link here";
+        } else {
+            action.textContent = isCitationDrag
+                ? "Insert citation here"
+                : "Insert link here";
+        }
 
         ghost.appendChild(self);
         ghost.appendChild(action);

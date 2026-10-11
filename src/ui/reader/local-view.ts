@@ -26,9 +26,9 @@ import { errorMessage as describeError } from "utils/error";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import {
     attachReaderChromeControls,
+    connectNoteStrip,
     readerChromeOptions,
     requestReaderThemeRefresh,
-    sendNoteStripBanner,
 } from "ui/reader/chrome";
 import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
@@ -49,6 +49,8 @@ const openingLocalReaders = new Map<string, WorkspaceLeaf>();
 
 export class LocalReaderView extends ItemView {
     private file: TFile | null = null;
+    /** ZotFlow Evo: where a link asked to go before the reader was open. */
+    private pendingNavigation?: ReaderNavigation;
     private bridge?: IframeReaderBridge;
     private colorScheme: ColorScheme = "light"; // Default to light
     private readerOptions: Partial<CreateReaderOptions> = {};
@@ -436,6 +438,10 @@ export class LocalReaderView extends ItemView {
                     autoDisableImageTool: autoDisable,
                     fontFamily: services.settings.epubFontFamily || undefined,
                     ...readerChromeOptions(),
+                // ZotFlow Evo: open where a link pointed, not where reading stopped.
+                ...(this.pendingNavigation
+                    ? { location: this.pendingNavigation }
+                    : {}),
                     ...themeOverrides,
                 };
 
@@ -446,8 +452,10 @@ export class LocalReaderView extends ItemView {
                     ...opts,
                 });
                 readerInitialized = true;
-                // ZotFlow Evo: the line above the note strip.
-                sendNoteStripBanner(this.bridge, { text: file.basename });
+                // ZotFlow Evo: the line above the note strip; a link that
+                // arrived while the document was opening.
+                connectNoteStrip(this.bridge, { text: file.basename });
+                this.finishPendingNavigation(opts.location);
             } catch (e) {
                 // If another Promise rejected first, release the lease when its
                 // in-flight load eventually settles.
@@ -502,8 +510,24 @@ export class LocalReaderView extends ItemView {
         return null;
     }
 
+    /**
+     * ZotFlow Evo: the reader is open. If it was opened at the place a link
+     * asked for (`openedAt`), that link is done; one that arrived later is
+     * followed now.
+     */
+    private finishPendingNavigation(openedAt: ReaderNavigation | undefined) {
+        const pending = this.pendingNavigation;
+        this.pendingNavigation = undefined;
+        if (pending && pending !== openedAt) this.readerNavigate(pending);
+    }
+
     readerNavigate(navigationInfo: ReaderNavigation) {
-        if (!this.bridge) return;
+        // ZotFlow Evo: asked before the reader is open (a link into a document
+        // that was closed): kept, and the document opens there.
+        if (!this.bridge || this.bridge.state !== "reader-ready") {
+            this.pendingNavigation = navigationInfo;
+            return;
+        }
         ff(
             this.bridge.navigate(navigationInfo),
             "Failed to navigate the reader",

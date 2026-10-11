@@ -788,14 +788,6 @@ export class IframeReaderBridge {
         });
     }
 
-    /** ZotFlow Evo: turn the comment popup next to annotations on or off. */
-    setAnnotationPopupSuppressed(suppressed: boolean) {
-        this.updateReaderOpts({ annotationPopupSuppressed: suppressed });
-        return this.runAfterBridgeReady(async () => {
-            await this.child!.setAnnotationPopupSuppressed(suppressed);
-        });
-    }
-
     /** ZotFlow Evo: change the note strip beside the PDF (any subset of its settings). */
     setNoteStrip(settings: ReaderNoteStrip) {
         this.updateReaderOpts({

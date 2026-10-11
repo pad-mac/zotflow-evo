@@ -584,26 +584,50 @@ describe("ZotFlow Evo: renderTemplate", () => {
         expect(out).toBe("quoted ([Attention Is All You Need, p. 5](obsidian://x))");
     });
 
-    test("the default banner and highlight templates render", async () => {
-        const { DEFAULT_HIGHLIGHT_DROP_TEMPLATE, DEFAULT_NOTE_STRIP_BANNER } =
-            await import("settings/types");
-        await article("ARTICLE1", { title: "A [bracketed] title" }, {
-            title: "A [bracketed] title",
-            publicationTitle: "NeurIPS",
-        });
-        const titles = service("");
+    test("the default banner renders", async () => {
+        const { DEFAULT_NOTE_STRIP_BANNER } = await import("settings/types");
+        await article("ARTICLE1", {}, { publicationTitle: "NeurIPS" });
 
         expect(
-            await titles.renderTemplate(USER_ID, "ARTICLE1", DEFAULT_NOTE_STRIP_BANNER),
-        ).toBe("Vaswani 2017 · A [bracketed] title · NeurIPS");
-        // Square brackets in a title would end the link text early.
+            await service("").renderTemplate(USER_ID, "ARTICLE1", DEFAULT_NOTE_STRIP_BANNER),
+        ).toBe("Vaswani 2017 · Attention Is All You Need · NeurIPS");
+    });
+
+    test("the default reference: author, year, short title and page, linked", async () => {
+        const { DEFAULT_DROP_LINK_TEMPLATE } = await import("settings/types");
+        await article("ARTICLE1", {}, { shortTitle: "Attention" });
+        const extra = { page: "5", link: "obsidian://x" };
+
         expect(
-            await titles.renderTemplate(USER_ID, "ARTICLE1", DEFAULT_HIGHLIGHT_DROP_TEMPLATE, {
-                text: "quoted",
-                page: "5",
-                link: "obsidian://x",
-            }),
-        ).toBe("quoted ([Vaswani 2017, A (bracketed) title, p. 5](obsidian://x))");
+            await service("").renderTemplate(USER_ID, "ARTICLE1", DEFAULT_DROP_LINK_TEMPLATE, extra),
+        ).toBe("([Vaswani - 2017 - Attention, p. 5](obsidian://x))");
+    });
+
+    test("the reference falls back to the title, and leaves out a missing author or year", async () => {
+        const { DEFAULT_DROP_LINK_TEMPLATE } = await import("settings/types");
+        // No short title; square brackets would end the link text early.
+        await article("ARTICLE1", { title: "A [bracketed] title" }, { title: "A [bracketed] title" });
+        await article("ANON0001", { title: "Untitled report" }, { title: "Untitled report", creators: [], date: "" });
+        const titles = service("");
+        const extra = { page: "5", link: "obsidian://x" };
+
+        expect(
+            await titles.renderTemplate(USER_ID, "ARTICLE1", DEFAULT_DROP_LINK_TEMPLATE, extra),
+        ).toBe("([Vaswani - 2017 - A (bracketed) title, p. 5](obsidian://x))");
+        expect(
+            await titles.renderTemplate(USER_ID, "ANON0001", DEFAULT_DROP_LINK_TEMPLATE, extra),
+        ).toBe("([Untitled report, p. 5](obsidian://x))");
+    });
+
+    test("the shortcuts sit beside `item`, and `extra` wins over them", async () => {
+        await article("ARTICLE1", {}, { shortTitle: "Attention" });
+        const titles = service("");
+        const source = "{{ author }}|{{ year }}|{{ shortTitle }}|{{ title }}|{{ item.shortTitle }}";
+
+        expect(await titles.renderTemplate(USER_ID, "ARTICLE1", source)).toBe(
+            "Vaswani|2017|Attention|Attention Is All You Need|Attention",
+        );
+        expect(await titles.renderTemplate(USER_ID, "ARTICLE1", source, { author: "Someone" })).toMatch(/^Someone\|/);
     });
 
     test("the defaults prefer Zotero's own author summary", async () => {

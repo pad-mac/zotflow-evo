@@ -28,9 +28,9 @@ import {
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import {
     attachReaderChromeControls,
+    connectNoteStrip,
     readerChromeOptions,
     requestReaderThemeRefresh,
-    sendNoteStripBanner,
 } from "ui/reader/chrome";
 import type { NoteStripSubject } from "ui/reader/chrome";
 import { noteLocalEdit } from "services/evo-auto-sync";
@@ -75,6 +75,8 @@ export class ZoteroReaderView extends ItemView {
      * can tell it has been superseded. */
     private documentGeneration = 0;
     private readerState: ReaderViewState = { libraryID: 0, itemKey: "" };
+    /** ZotFlow Evo: where a link asked to go before the reader was open. */
+    private pendingNavigation?: ReaderNavigation;
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
@@ -570,6 +572,10 @@ export class ZoteroReaderView extends ItemView {
                 autoDisableImageTool: autoDisable,
                 fontFamily: services.settings.epubFontFamily || undefined,
                 ...readerChromeOptions(),
+                // ZotFlow Evo: open where a link pointed, not where reading stopped.
+                ...(this.pendingNavigation
+                    ? { location: this.pendingNavigation }
+                    : {}),
                 ...themeOverrides,
                 ...(isReadOnly ? { readOnly: true } : {}),
             };
@@ -617,8 +623,10 @@ export class ZoteroReaderView extends ItemView {
             readerInitialized = true;
             if (superseded()) return;
 
-            // ZotFlow Evo: the line above the note strip.
-            sendNoteStripBanner(this.bridge, this.noteStripSubject());
+            // ZotFlow Evo: the line above the note strip; a link that arrived
+            // while the document was opening.
+            connectNoteStrip(this.bridge, this.noteStripSubject());
+            this.finishPendingNavigation(opts.location);
 
             // Subscribe to sync events for live annotation updates
             this.subscribeToSyncEvents();
@@ -653,8 +661,24 @@ export class ZoteroReaderView extends ItemView {
         }
     }
 
+    /**
+     * ZotFlow Evo: the reader is open. If it was opened at the place a link
+     * asked for (`openedAt`), that link is done; one that arrived later is
+     * followed now.
+     */
+    private finishPendingNavigation(openedAt: ReaderNavigation | undefined) {
+        const pending = this.pendingNavigation;
+        this.pendingNavigation = undefined;
+        if (pending && pending !== openedAt) this.readerNavigate(pending);
+    }
+
     readerNavigate(navigationInfo: ReaderNavigation) {
-        if (!this.bridge) return;
+        // ZotFlow Evo: asked before the reader is open (a link into a document
+        // that was closed): kept, and the document opens there.
+        if (!this.bridge || this.bridge.state !== "reader-ready") {
+            this.pendingNavigation = navigationInfo;
+            return;
+        }
 
         ff(
             this.bridge.navigate(navigationInfo),

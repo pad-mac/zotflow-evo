@@ -6,7 +6,7 @@
 import { notifyReaderChromeChanged } from "ui/reader/chrome";
 import { ANNOTATION_COLORS } from "ui/editor/evo-drop";
 import {
-    DEFAULT_HIGHLIGHT_DROP_TEMPLATE,
+    DEFAULT_DROP_LINK_TEMPLATE,
     DEFAULT_NOTE_STRIP_BANNER,
 } from "settings/types";
 
@@ -19,7 +19,13 @@ import type {
 import type { EvoDropAffixes, SettingKey } from "settings/types";
 
 /** The note strip switches, which the reader's header buttons change as well. */
-type StripToggleKey = "readerNoteStripVisible" | "readerNoteStripCollapsed";
+type StripToggleKey =
+    | "readerNoteStripVisible"
+    | "readerNoteStripList"
+    | "readerNoteStripHighlights";
+
+/** The two per-colour tables of text around a drop. */
+type DropTableKey = "evoHighlightDrop" | "evoCommentDrop";
 
 /** Narrowest and widest note strip the reader accepts, in pixels. */
 const STRIP_WIDTH_MIN = 160;
@@ -42,12 +48,18 @@ export class EvoSection {
                             this.readerToggle(setting, "readerNoteStripVisible"),
                     },
                     {
-                        name: "Comments as a list",
-                        desc: "Show the comments one below the other instead of beside their place on the page. Also a button in the reader's header and a command.",
+                        name: "As a list",
+                        desc: "The strip is a list of its own, like the reader's annotations sidebar. Off, every entry sits beside its place on the page and the strip scrolls with the pages. Also a button in the reader's header and a command.",
+                        render: (setting) =>
+                            this.readerToggle(setting, "readerNoteStripList"),
+                    },
+                    {
+                        name: "Show highlights",
+                        desc: "List the highlights themselves, with their full text, not only comments and notes. Also a button at the top of the strip and a command.",
                         render: (setting) =>
                             this.readerToggle(
                                 setting,
-                                "readerNoteStripCollapsed",
+                                "readerNoteStripHighlights",
                             ),
                     },
                     {
@@ -105,38 +117,49 @@ export class EvoSection {
                 heading: "Dragging into notes",
                 items: [
                     {
-                        name: "Highlight drop template",
-                        desc: "LiquidJS template for a highlight (or selected text) dragged from a PDF into a note. Variables: text, comment, page, link (opens the PDF at that place), color, and item as in the display title template. Leave empty to drop the default citation format instead. Holding Shift, Ctrl/Cmd or Alt while dropping always gives a citation format.",
+                        name: "Reference",
+                        desc: "LiquidJS template for the reference that follows a highlight or comment dragged from a PDF into a note. Variables: author, year, shortTitle, title, page, link (opens the PDF at that place), text, comment, color, and item as in the display title template. Leave empty for no reference. Holding Shift, Ctrl/Cmd or Alt while dropping gives a citation format instead.",
                         render: (setting) => {
                             setting.addTextArea((area) => {
-                                area.setPlaceholder(
-                                    DEFAULT_HIGHLIGHT_DROP_TEMPLATE,
-                                )
+                                area.setPlaceholder(DEFAULT_DROP_LINK_TEMPLATE)
                                     .setValue(
                                         this.plugin.settings
-                                            .evoHighlightDropTemplate,
+                                            .evoDropLinkTemplate,
                                     )
                                     .onChange(async (value) => {
-                                        this.plugin.settings.evoHighlightDropTemplate =
+                                        this.plugin.settings.evoDropLinkTemplate =
                                             value;
                                         await this.plugin.saveSettings();
                                     });
-                                area.inputEl.rows = 4;
+                                area.inputEl.rows = 3;
                                 area.inputEl.addClass("zotflow-evo-wide-input");
                             });
                         },
                     },
+                ],
+            },
+            this.dropTable(
+                "Highlights dropped into a note, by colour",
+                "Text put before and after a highlight (or selected text) dragged from the page. The highlighted text comes in quotation marks, the reference after it. To place the reference yourself write {{cite}} in either field; {{page}}, {{link}}, {{text}}, {{comment}} and {{color}} are filled in too.",
+                "evoHighlightDrop",
+            ),
+            this.dropTable(
+                "Comments dropped into a note, by colour",
+                "The same for a comment dragged from the note strip.",
+                "evoCommentDrop",
+            ),
+            {
+                type: "group",
+                heading: "Links to source notes",
+                items: [
                     {
-                        name: "Comment drop text, by colour",
-                        desc: "Text put before and after a comment dragged from the note strip into a note, for each annotation colour. The page number, linked to the place in the PDF, follows the comment; to place it yourself write {{page}} and {{link}} in either field, for example  ([{{page}}]({{link}})) . {{text}} is the highlighted text.",
+                        name: "Open the PDF instead of the note",
+                        desc: "A click on a link to a source note opens the item's PDF, EPUB or snapshot (asking when there are several). Ctrl/Cmd-click opens the note itself, as do links to a heading or block of it and items that have nothing to open.",
+                        control: {
+                            type: "toggle",
+                            key: "evoSourceLinksOpenAttachment",
+                        },
                     },
-                    ...ANNOTATION_COLORS.map(
-                        ({ name, hex }): SettingGroupItem<SettingKey> => ({
-                            name,
-                            render: (setting) =>
-                                this.colorRow(setting, hex),
-                        }),
-                    ),
                 ],
             },
             {
@@ -171,23 +194,44 @@ export class EvoSection {
         });
     }
 
-    /** One colour of the comment drop table: a swatch, "before" and "after". */
-    private colorRow(setting: Setting, hex: string) {
+    /** A group with one row per annotation colour: text before and after a drop. */
+    private dropTable(
+        heading: string,
+        desc: string,
+        key: DropTableKey,
+    ): SettingDefinitionItem<SettingKey> {
+        return {
+            type: "group",
+            heading,
+            items: [
+                { name: "Text before and after", desc },
+                ...ANNOTATION_COLORS.map(
+                    ({ name, hex }): SettingGroupItem<SettingKey> => ({
+                        name,
+                        render: (setting) => this.colorRow(setting, key, hex),
+                    }),
+                ),
+            ],
+        };
+    }
+
+    /** One colour of a drop table: a swatch, "before" and "after". */
+    private colorRow(setting: Setting, key: DropTableKey, hex: string) {
         const swatch = createSpan({ cls: "zotflow-evo-swatch" });
         swatch.setCssProps({ "--zotflow-evo-swatch": hex });
         setting.nameEl.prepend(swatch);
 
         const read = (): EvoDropAffixes =>
-            this.plugin.settings.evoCommentDrop[hex] ?? {
+            this.plugin.settings[key]?.[hex] ?? {
                 before: "",
                 after: "",
             };
         const write = async (patch: Partial<EvoDropAffixes>) => {
             const next: EvoDropAffixes = { ...read(), ...patch };
-            const table = { ...this.plugin.settings.evoCommentDrop };
+            const table = { ...this.plugin.settings[key] };
             if (next.before || next.after) table[hex] = next;
             else delete table[hex];
-            this.plugin.settings.evoCommentDrop = table;
+            this.plugin.settings[key] = table;
             await this.plugin.saveSettings();
         };
 
@@ -195,13 +239,13 @@ export class EvoSection {
             text.setPlaceholder("Before")
                 .setValue(read().before)
                 .onChange((value) => write({ before: value }));
-            text.inputEl.setAttribute("aria-label", "Text before the comment");
+            text.inputEl.setAttribute("aria-label", "Text before");
         });
         setting.addText((text) => {
             text.setPlaceholder("After")
                 .setValue(read().after)
                 .onChange((value) => write({ after: value }));
-            text.inputEl.setAttribute("aria-label", "Text after the comment");
+            text.inputEl.setAttribute("aria-label", "Text after");
         });
     }
 }

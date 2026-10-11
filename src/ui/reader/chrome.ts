@@ -1,7 +1,6 @@
 /**
  * ZotFlow Evo (fork): reader chrome the user toggles from Obsidian — the
- * reader toolbar, the comment popup and the note strip beside a PDF — and
- * the theme refresh.
+ * reader toolbar and the note strip beside a PDF — and the theme refresh.
  *
  * The fork's reader-view logic lives here so the upstream view files only
  * gain a few calls into this module. See FORK.md.
@@ -28,9 +27,9 @@ const THEME_REFRESH_DEBOUNCE_MS = 200;
 
 type ChromeSetting =
     | "readerToolbarHidden"
-    | "readerCommentPopupSuppressed"
     | "readerNoteStripVisible"
-    | "readerNoteStripCollapsed";
+    | "readerNoteStripList"
+    | "readerNoteStripHighlights";
 
 /**
  * What the line above a reader's note strip is about: a Zotero item, whose
@@ -46,35 +45,33 @@ const chromeChanged = new EventBus<[]>();
 /**
  * The chrome settings in the shape `initReader` takes. The note strip comes
  * without its banner, which needs the item's metadata from the worker; the
- * views send it with `sendNoteStripBanner()` once the reader is open.
+ * views send it with `connectNoteStrip()` once the reader is open.
  */
 export function readerChromeOptions(): Pick<
     CreateReaderOptions,
-    "toolbarHidden" | "annotationPopupSuppressed" | "noteStrip"
+    "toolbarHidden" | "noteStrip"
 > {
     return {
         toolbarHidden: services.settings.readerToolbarHidden,
-        annotationPopupSuppressed:
-            services.settings.readerCommentPopupSuppressed,
         noteStrip: noteStripSettings(),
     };
 }
 
-function toggleChromeSetting(setting: ChromeSetting) {
-    services.settings[setting] = !services.settings[setting];
+function setChromeSetting(setting: ChromeSetting, value: boolean) {
+    if (services.settings[setting] === value) return;
+    services.settings[setting] = value;
     // Readers follow at once; the write to data.json may take a moment.
     chromeChanged.emit();
     ff(services.saveSettings(), "Failed to save the reader chrome setting");
 }
 
+function toggleChromeSetting(setting: ChromeSetting) {
+    setChromeSetting(setting, !services.settings[setting]);
+}
+
 /** Show or hide the reader toolbar in every open reader. */
 export function toggleReaderToolbar() {
     toggleChromeSetting("readerToolbarHidden");
-}
-
-/** Turn the comment popup next to annotations on or off in every open reader. */
-export function toggleReaderCommentPopup() {
-    toggleChromeSetting("readerCommentPopupSuppressed");
 }
 
 /** Show or hide the note strip beside PDFs in every open reader. */
@@ -83,17 +80,15 @@ export function toggleReaderNoteStrip() {
 }
 
 /**
- * Switch the note strip between comments beside their place on the page and
- * comments one below the other. Asked for while the strip is hidden, it
- * shows the strip as a list.
+ * Switch the note strip between a list of its own and entries beside their
+ * place on the page. Asked for while the strip is hidden, it shows the strip.
  */
 export function toggleReaderNoteStripList() {
     if (!services.settings.readerNoteStripVisible) {
-        services.settings.readerNoteStripCollapsed = true;
         toggleChromeSetting("readerNoteStripVisible");
         return;
     }
-    toggleChromeSetting("readerNoteStripCollapsed");
+    toggleChromeSetting("readerNoteStripList");
 }
 
 /** Tell every open reader that a chrome setting was changed elsewhere (the settings tab). */
@@ -106,8 +101,9 @@ function noteStripSettings(): ReaderNoteStrip {
     const settings = services.settings;
     return {
         visible: settings.readerNoteStripVisible,
-        collapsed: settings.readerNoteStripCollapsed,
+        collapsed: settings.readerNoteStripList,
         width: settings.readerNoteStripWidth,
+        highlights: settings.readerNoteStripHighlights,
     };
 }
 
@@ -142,16 +138,17 @@ async function renderNoteStripBanner(
 
 /** Counts banner renders per reader, so a slow one does not overwrite a later one. */
 const bannerRuns = new WeakMap<IframeReaderBridge, number>();
+/** Readers whose strip already reports its own changes to this module. */
+const listening = new WeakSet<IframeReaderBridge>();
 
 /**
  * Render the line above the note strip for `subject` and send it to the
  * reader. Returns at once; the banner follows when the template has rendered.
  */
-export function sendNoteStripBanner(
-    bridge: IframeReaderBridge | undefined,
+function sendNoteStripBanner(
+    bridge: IframeReaderBridge,
     subject: NoteStripSubject | undefined,
 ) {
-    if (!bridge) return;
     const run = (bannerRuns.get(bridge) ?? 0) + 1;
     bannerRuns.set(bridge, run);
     ff(
@@ -162,6 +159,28 @@ export function sendNoteStripBanner(
         }),
         "Failed to update the reader note strip banner",
     );
+}
+
+/**
+ * Call once the reader is open: sends the line above the note strip, and
+ * takes up what is changed in the strip itself (its "highlights" button), so
+ * that it is kept and the other open readers follow.
+ */
+export function connectNoteStrip(
+    bridge: IframeReaderBridge | undefined,
+    subject: NoteStripSubject | undefined,
+) {
+    if (!bridge) return;
+    if (!listening.has(bridge)) {
+        listening.add(bridge);
+        bridge.onEventType("noteStripChanged", (event) => {
+            const { highlights } = event.settings;
+            if (typeof highlights === "boolean") {
+                setChromeSetting("readerNoteStripHighlights", highlights);
+            }
+        });
+    }
+    sendNoteStripBanner(bridge, subject);
 }
 
 /** Commands for the toggles, so they can be bound to hotkeys. */
@@ -177,14 +196,14 @@ export function registerReaderChromeCommands(plugin: Plugin) {
         callback: toggleReaderNoteStripList,
     });
     plugin.addCommand({
+        id: "toggle-reader-note-strip-highlights",
+        name: "Toggle highlights in the reader note strip",
+        callback: () => toggleChromeSetting("readerNoteStripHighlights"),
+    });
+    plugin.addCommand({
         id: "toggle-reader-toolbar",
         name: "Toggle reader toolbar",
         callback: toggleReaderToolbar,
-    });
-    plugin.addCommand({
-        id: "toggle-reader-comment-popup",
-        name: "Toggle reader comment popup",
-        callback: toggleReaderCommentPopup,
     });
 }
 
@@ -201,7 +220,6 @@ function setActionIcon(el: HTMLElement, icon: string, fallback: string) {
  */
 class ReaderChromeControls {
     private readonly toolbarAction: HTMLElement;
-    private readonly popupAction: HTMLElement;
     private readonly stripAction: HTMLElement;
     private readonly stripListAction: HTMLElement;
 
@@ -211,14 +229,9 @@ class ReaderChromeControls {
         private readonly getSubject: () => NoteStripSubject | undefined,
     ) {
         // Obsidian places each new action before the earlier ones.
-        this.popupAction = view.addAction(
-            "message-square",
-            "Turn off comment popup",
-            toggleReaderCommentPopup,
-        );
         this.stripListAction = view.addAction(
             "list",
-            "Show comments as a list",
+            "Show notes beside the page",
             toggleReaderNoteStripList,
         );
         this.stripAction = view.addAction(
@@ -249,23 +262,13 @@ class ReaderChromeControls {
         ) {
             return;
         }
-        const { toolbarHidden, annotationPopupSuppressed } =
-            readerChromeOptions();
         ff(
-            bridge.setToolbarHidden(toolbarHidden ?? false),
+            bridge.setToolbarHidden(
+                services.settings.readerToolbarHidden,
+            ),
             "Failed to toggle the reader toolbar",
         );
-        this.applyNoteStrip(bridge);
-        ff(
-            bridge.setAnnotationPopupSuppressed(
-                annotationPopupSuppressed ?? false,
-            ),
-            "Failed to toggle the reader comment popup",
-        );
-    }
-
-    /** The strip follows at once; its banner when the template has rendered. */
-    private applyNoteStrip(bridge: IframeReaderBridge) {
+        // The strip follows at once; its banner when the template has rendered.
         ff(
             bridge.setNoteStrip(noteStripSettings()),
             "Failed to update the reader note strip",
@@ -289,17 +292,6 @@ class ReaderChromeControls {
             toolbarHidden ? "Show reader toolbar" : "Hide reader toolbar",
         );
 
-        const popupOff = services.settings.readerCommentPopupSuppressed;
-        setActionIcon(
-            this.popupAction,
-            popupOff ? "message-square-off" : "message-square",
-            "message-square",
-        );
-        this.popupAction.setAttribute(
-            "aria-label",
-            popupOff ? "Turn on comment popup" : "Turn off comment popup",
-        );
-
         const stripShown = services.settings.readerNoteStripVisible;
         setActionIcon(
             this.stripAction,
@@ -311,7 +303,9 @@ class ReaderChromeControls {
             stripShown ? "Hide note strip" : "Show note strip",
         );
 
-        const asList = stripShown && services.settings.readerNoteStripCollapsed;
+        // The icon names what a click gives: spread beside the page, or
+        // gathered into a list.
+        const asList = services.settings.readerNoteStripList;
         setActionIcon(
             this.stripListAction,
             asList ? "unfold-vertical" : "fold-vertical",
@@ -319,9 +313,7 @@ class ReaderChromeControls {
         );
         this.stripListAction.setAttribute(
             "aria-label",
-            asList
-                ? "Show comments beside the page"
-                : "Show comments as a list",
+            asList ? "Show notes beside the page" : "Show notes as a list",
         );
     }
 }

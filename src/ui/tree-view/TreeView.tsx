@@ -558,7 +558,10 @@ export const ZotFlowTree = () => {
                             openByDefault={false}
                             disableDrag={true}
                             disableDrop={true}
-                            disableMultiSelection={true}
+                            // ZotFlow Evo: several items can be selected in
+                            // the library browser tab (evo-browser.ts); the
+                            // sidebar tree never asks for more than one.
+                            disableMultiSelection={false}
                             dndRootElement={voidElement}
                         >
                             {NodeItem}

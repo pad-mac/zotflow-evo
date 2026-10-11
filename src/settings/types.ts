@@ -81,12 +81,15 @@ export interface ZotFlowSettings {
     epubFontFamily: string;
     /** ZotFlow Evo: reader toolbar hidden (toggled from the view header). */
     readerToolbarHidden: boolean;
-    /** ZotFlow Evo: comment popup next to annotations turned off. */
-    readerCommentPopupSuppressed: boolean;
     /** ZotFlow Evo: note strip beside PDFs shown (toggled from the view header). */
     readerNoteStripVisible: boolean;
-    /** ZotFlow Evo: note strip in list mode — comments without the space between them. */
-    readerNoteStripCollapsed: boolean;
+    /**
+     * ZotFlow Evo: note strip as a list (a column of its own); off, every
+     * entry sits beside its place on the page and the strip scrolls with it.
+     */
+    readerNoteStripList: boolean;
+    /** ZotFlow Evo: the note strip also lists the highlights themselves, not only comments. */
+    readerNoteStripHighlights: boolean;
     /** ZotFlow Evo: width of the note strip in pixels. */
     readerNoteStripWidth: number;
     /** ZotFlow Evo: LiquidJS template for the line pinned above the note strip; "" for none. */
@@ -96,11 +99,15 @@ export interface ZotFlowSettings {
      * strip into a note, per annotation colour (lower-case hex, e.g. "#ffd400").
      */
     evoCommentDrop: Record<string, EvoDropAffixes>;
+    /** ZotFlow Evo: the same for a highlight (or selected text) dragged from the reader. */
+    evoHighlightDrop: Record<string, EvoDropAffixes>;
     /**
-     * ZotFlow Evo: LiquidJS template for a highlight (or selected text)
-     * dragged from the reader into a note; "" keeps the default citation format.
+     * ZotFlow Evo: LiquidJS template for the linked reference that follows a
+     * dropped highlight or comment.
      */
-    evoHighlightDropTemplate: string;
+    evoDropLinkTemplate: string;
+    /** ZotFlow Evo: a click on a link to a source note opens the item's PDF instead of the note. */
+    evoSourceLinksOpenAttachment: boolean;
     /** ZotFlow Evo: sync a library as soon as Zotero reports a change to it. */
     autoSyncPull: boolean;
     /** ZotFlow Evo: sync shortly after something was changed here. */
@@ -124,12 +131,13 @@ export const DEFAULT_NOTE_STRIP_BANNER =
     "{{ item.creatorSummary | default: item.creators[0].lastName | default: item.creators[0].name }}{% if item.year %} {{ item.year }}{% endif %} · {{ item.title }}{% if item.publicationTitle %} · {{ item.publicationTitle }}{% endif %}{% if item.bookTitle %} · {{ item.bookTitle }}{% endif %}";
 
 /**
- * ZotFlow Evo: default text for a highlight dropped into a note — the
- * highlighted text, then author, year, title and page in brackets, linked to
- * the place in the PDF.
+ * ZotFlow Evo: default reference after a dropped highlight or comment —
+ * author, year, short title and page in brackets, linked to the place in the
+ * PDF. `author`, `year`, `shortTitle` and `title` are shortcuts the template
+ * gets next to `item`; a missing author or year leaves no stray separator.
  */
-export const DEFAULT_HIGHLIGHT_DROP_TEMPLATE =
-    '{{ text }} ([{{ item.creatorSummary | default: item.creators[0].lastName | default: item.creators[0].name }}{% if item.year %} {{ item.year }}{% endif %}, {{ item.title | replace: "[", "(" | replace: "]", ")" }}, p. {{ page }}]({{ link }}))';
+export const DEFAULT_DROP_LINK_TEMPLATE =
+    "([{% if author %}{{ author }} - {% endif %}{% if year %}{{ year }} - {% endif %}{{ shortTitle }}, p. {{ page }}]({{ link }}))";
 
 /** Top-level key addressable by Obsidian's declarative settings controls. */
 export type SettingKey = Extract<keyof ZotFlowSettings, string>;
@@ -203,13 +211,15 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     autoDisableNoteImageTextTools: true,
     epubFontFamily: "",
     readerToolbarHidden: false,
-    readerCommentPopupSuppressed: false,
     readerNoteStripVisible: true,
-    readerNoteStripCollapsed: false,
+    readerNoteStripList: true,
+    readerNoteStripHighlights: false,
     readerNoteStripWidth: 320,
     readerNoteStripBanner: DEFAULT_NOTE_STRIP_BANNER,
     evoCommentDrop: {},
-    evoHighlightDropTemplate: DEFAULT_HIGHLIGHT_DROP_TEMPLATE,
+    evoHighlightDrop: {},
+    evoDropLinkTemplate: DEFAULT_DROP_LINK_TEMPLATE,
+    evoSourceLinksOpenAttachment: true,
     autoSyncPull: true,
     autoSyncPush: true,
     cslDefaultStyleId: "apa",

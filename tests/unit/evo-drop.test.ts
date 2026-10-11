@@ -3,14 +3,14 @@
  * dragged out of the reader becomes in a note.
  *
  * The text ends up in the user's note, so the cases pin the exact output:
- * where the page link goes, what the colour table does, and which drops are
- * left to the citation formats.
+ * the quotation marks, where the reference goes, what the colour tables do,
+ * and which drops are left to the citation formats.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     affixesForColor,
-    formatCommentDrop,
+    composeDrop,
     handleReaderDrop,
     plainCommentDrop,
     readerLink,
@@ -23,7 +23,8 @@ import type { ZotFlowCitationPayload } from "ui/editor/citation-helper";
 
 interface MockState {
     evoCommentDrop: Record<string, EvoDropAffixes>;
-    evoHighlightDropTemplate: string;
+    evoHighlightDrop: Record<string, EvoDropAffixes>;
+    evoDropLinkTemplate: string;
     rendered: { libraryID: number; key: string; source: string; extra: Record<string, unknown> }[];
     renderRejects: boolean;
     notices: string[];
@@ -32,7 +33,8 @@ interface MockState {
 
 const state = vi.hoisted(() => ({
     evoCommentDrop: {},
-    evoHighlightDropTemplate: "{{ text }} ({{ page }})",
+    evoHighlightDrop: {},
+    evoDropLinkTemplate: "TEMPLATE",
     rendered: [],
     renderRejects: false,
     notices: [],
@@ -44,7 +46,8 @@ vi.mock("services/services", () => ({
         get settings() {
             return {
                 evoCommentDrop: state.evoCommentDrop,
-                evoHighlightDropTemplate: state.evoHighlightDropTemplate,
+                evoHighlightDrop: state.evoHighlightDrop,
+                evoDropLinkTemplate: state.evoDropLinkTemplate,
             };
         },
         logService: { error: (m: string) => state.errors.push(m) },
@@ -54,6 +57,7 @@ vi.mock("services/services", () => ({
     },
 }));
 
+// The worker renders the reference; here it is "(ref p. <page>)".
 vi.mock("bridge", () => ({
     workerBridge: {
         displayTitle: {
@@ -66,7 +70,7 @@ vi.mock("bridge", () => ({
                 state.rendered.push({ libraryID, key, source, extra });
                 return state.renderRejects
                     ? Promise.reject(new Error("template blew up"))
-                    : Promise.resolve(`<${String(extra.text)}|${String(extra.page)}>`);
+                    : Promise.resolve(`  (ref p. ${String(extra.page)})\n`);
             },
         },
     },
@@ -130,12 +134,14 @@ const payload = (patch: Partial<ZotFlowCitationPayload> = {}): ZotFlowCitationPa
     ...patch,
 });
 
+const NONE: EvoDropAffixes = { before: "", after: "" };
 const ANNOTATION_LINK =
     "obsidian://zotflow?type=open-annotation&libraryID=7&key=ANNO0001";
 
 beforeEach(() => {
     state.evoCommentDrop = {};
-    state.evoHighlightDropTemplate = "{{ text }} ({{ page }})";
+    state.evoHighlightDrop = {};
+    state.evoDropLinkTemplate = "TEMPLATE";
     state.rendered = [];
     state.renderRejects = false;
     state.notices = [];
@@ -156,46 +162,66 @@ describe("readerLink", () => {
     });
 });
 
-describe("formatCommentDrop", () => {
-    it("puts the linked page number after the comment by default", () => {
-        expect(formatCommentDrop(annotation(), {})).toBe(
-            `my comment [p. 12](${ANNOTATION_LINK})`,
+describe("composeDrop", () => {
+    it("puts a highlight's text in quotation marks, the reference after it", () => {
+        expect(composeDrop("highlight", annotation(), "(ref)", NONE)).toBe(
+            "“the highlighted words” (ref)",
         );
     });
 
-    it("wraps the comment in the text set for its colour", () => {
-        const table = { "#ffd400": { before: "- & ", after: " #idea" } };
-        expect(formatCommentDrop(annotation(), table)).toBe(
-            `- & my comment [p. 12](${ANNOTATION_LINK}) #idea`,
+    it("drops a comment as it is, the reference after it", () => {
+        expect(composeDrop("comment", annotation({ comment: "  spaced  " }), "(ref)", NONE)).toBe(
+            "spaced (ref)",
         );
     });
 
-    it("finds the colour whatever its letter case, and leaves other colours bare", () => {
-        const table = { "#ffd400": { before: "> ", after: "" } };
-        expect(formatCommentDrop(annotation({ color: "#FFD400" }), table)).toMatch(/^> my comment/);
-        expect(formatCommentDrop(annotation({ color: "#ff6666" }), table)).toMatch(/^my comment/);
-    });
-
-    it("leaves the link to an affix that places it itself", () => {
-        const table = { "#ffd400": { before: "", after: " ([{{page}}]({{ link }}))" } };
-        expect(formatCommentDrop(annotation(), table)).toBe(
-            `my comment ([12](${ANNOTATION_LINK}))`,
+    it("wraps either in the text set for the colour", () => {
+        const affixes = { before: "- & ", after: " #idea" };
+        expect(composeDrop("highlight", annotation(), "(ref)", affixes)).toBe(
+            "- & “the highlighted words” (ref) #idea",
+        );
+        expect(composeDrop("comment", annotation(), "(ref)", affixes)).toBe(
+            "- & my comment (ref) #idea",
         );
     });
 
-    it("fills the highlighted text and the colour too", () => {
-        const table = { "#ffd400": { before: "“{{text}}” {{color}}: ", after: "" } };
-        expect(formatCommentDrop(annotation(), table)).toMatch(
-            /^“the highlighted words” #ffd400: my comment \[p\. 12\]/,
-        );
+    it("leaves the reference to an affix that places it, or the bare link, itself", () => {
+        expect(
+            composeDrop("comment", annotation(), "(ref)", { before: "{{ cite }}: ", after: "" }),
+        ).toBe("(ref): my comment");
+        expect(
+            composeDrop("highlight", annotation(), "(ref)", { before: "", after: " [{{page}}]({{link}})" }),
+        ).toBe(`“the highlighted words” [12](${ANNOTATION_LINK})`);
     });
 
-    it("trims the comment and tolerates a missing colour entry field", () => {
-        const table = { "#ffd400": { before: "* " } as EvoDropAffixes };
-        expect(formatCommentDrop(annotation({ comment: "  spaced  " }), table)).toBe(
-            `* spaced [p. 12](${ANNOTATION_LINK})`,
-        );
-        expect(affixesForColor(undefined, undefined)).toEqual({ before: "", after: "" });
+    it("fills the other fields into the affixes", () => {
+        expect(
+            composeDrop("comment", annotation(), "(ref)", {
+                before: "{{color}} “{{text}}” — ",
+                after: " <{{comment}}>",
+            }),
+        ).toBe("#ffd400 “the highlighted words” — my comment (ref) <my comment>");
+    });
+
+    it("drops only the reference for a highlight without text (an image)", () => {
+        expect(composeDrop("highlight", annotation({ text: "" }), "(ref)", NONE)).toBe("(ref)");
+    });
+
+    it("drops no stray space when there is no reference", () => {
+        expect(composeDrop("highlight", annotation(), "", NONE)).toBe("“the highlighted words”");
+    });
+});
+
+describe("affixesForColor", () => {
+    it("finds the colour whatever its letter case; other colours get nothing", () => {
+        const table = { "#ffd400": { before: "> ", after: "!" } };
+        expect(affixesForColor(table, "#FFD400")).toEqual({ before: "> ", after: "!" });
+        expect(affixesForColor(table, "#ff6666")).toEqual(NONE);
+        expect(affixesForColor(undefined, undefined)).toEqual(NONE);
+        expect(affixesForColor({ "#ffd400": { before: "* " } as EvoDropAffixes }, "#ffd400")).toEqual({
+            before: "* ",
+            after: "",
+        });
     });
 });
 
@@ -223,45 +249,27 @@ describe("handleReaderDrop", () => {
         const e = fakeEditor();
         for (const mod of ["shiftKey", "ctrlKey", "metaKey", "altKey"] as const) {
             expect(handleReaderDrop(drop({ [mod]: true }), e.editor, payload())).toBe(false);
+            expect(handleReaderDrop(drop({ [mod]: true }), e.editor, payload({ evoSource: "highlight" }))).toBe(false);
         }
     });
 
-    it("leaves a highlight to the citation formats when the template is empty", () => {
-        state.evoHighlightDropTemplate = "  ";
-        const e = fakeEditor();
-        expect(handleReaderDrop(drop(), e.editor, payload({ evoSource: "highlight" }))).toBe(false);
-    });
-
-    it("inserts dropped comments at the cursor, one per line, and moves the cursor behind them", async () => {
-        state.evoCommentDrop = { "#ff6666": { before: "! ", after: "" } };
+    it("inserts a dropped highlight at the cursor and moves the cursor behind it", async () => {
+        state.evoHighlightDrop = { "#ffd400": { before: "> ", after: "" } };
+        state.evoCommentDrop = { "#ffd400": { before: "WRONG TABLE ", after: "" } };
         const e = fakeEditor("ab", 1);
-        const handled = handleReaderDrop(
-            drop(),
-            e.editor,
-            payload({
-                annotations: [
-                    annotation(),
-                    annotation({ id: "ANNO0002", color: "#ff6666", comment: "second", pageLabel: "3" }),
-                    annotation({ id: "ANNO0003", comment: "" }),
-                ],
-            }),
-        );
-        expect(handled).toBe(true);
+        expect(handleReaderDrop(drop(), e.editor, payload({ evoSource: "highlight" }))).toBe(true);
         await vi.waitFor(() => expect(e.doc).not.toBe("ab"));
-        const inserted =
-            `my comment [p. 12](${ANNOTATION_LINK})\n` +
-            "! second [p. 3](obsidian://zotflow?type=open-annotation&libraryID=7&key=ANNO0002)";
+        const inserted = "> “the highlighted words” (ref p. 12)";
         expect(e.doc).toBe("a" + inserted + "b");
         expect(e.cursor).toBe(1 + inserted.length);
     });
 
-    it("renders a highlight through the template, with the item's key and the annotation's values", async () => {
+    it("renders the reference with the item's key and the annotation's values", async () => {
         const e = fakeEditor("");
         handleReaderDrop(drop(), e.editor, payload({ evoSource: "highlight" }));
-        await vi.waitFor(() => expect(e.doc).toBe("<the highlighted words|12>"));
-        expect(state.rendered).toHaveLength(1);
+        await vi.waitFor(() => expect(state.rendered).toHaveLength(1));
         const call = state.rendered[0]!;
-        expect([call.libraryID, call.key, call.source]).toEqual([7, "PARENT01", "{{ text }} ({{ page }})"]);
+        expect([call.libraryID, call.key, call.source]).toEqual([7, "PARENT01", "TEMPLATE"]);
         expect(call.extra).toMatchObject({
             text: "the highlighted words",
             comment: "my comment",
@@ -271,12 +279,40 @@ describe("handleReaderDrop", () => {
         });
     });
 
-    it("inserts at the cursor's new place if the note changed while the template rendered", async () => {
-        const e = fakeEditor("start");
+    it("drops comments one per line, each with its own reference and colour text; empty ones are skipped", async () => {
+        state.evoCommentDrop = { "#ff6666": { before: "! ", after: "" } };
+        state.evoHighlightDrop = { "#ff6666": { before: "WRONG TABLE ", after: "" } };
+        const e = fakeEditor("");
+        handleReaderDrop(
+            drop(),
+            e.editor,
+            payload({
+                annotations: [
+                    annotation(),
+                    annotation({ id: "ANNO0002", color: "#ff6666", comment: "second", pageLabel: "3" }),
+                    annotation({ id: "ANNO0003", comment: "  " }),
+                ],
+            }),
+        );
+        await vi.waitFor(() => expect(e.doc).not.toBe(""));
+        expect(e.doc).toBe("my comment (ref p. 12)\n! second (ref p. 3)");
+        expect(state.rendered).toHaveLength(2);
+    });
+
+    it("drops without a reference, and without asking the worker, when the template is empty", async () => {
+        state.evoDropLinkTemplate = "   ";
+        const e = fakeEditor("");
         handleReaderDrop(drop(), e.editor, payload({ evoSource: "highlight" }));
-        e.type(" more");
-        await vi.waitFor(() => expect(e.doc).toContain("<"));
-        expect(e.doc).toBe("start more<the highlighted words|12>");
+        await vi.waitFor(() => expect(e.doc).toBe("“the highlighted words”"));
+        expect(state.rendered).toHaveLength(0);
+    });
+
+    it("inserts at the cursor's new place if the note changed while the reference rendered", async () => {
+        const e = fakeEditor("start");
+        handleReaderDrop(drop(), e.editor, payload());
+        e.type(" more ");
+        await vi.waitFor(() => expect(e.doc).toContain("(ref"));
+        expect(e.doc).toBe("start more my comment (ref p. 12)");
     });
 
     it("says so and inserts nothing when the template fails", async () => {
