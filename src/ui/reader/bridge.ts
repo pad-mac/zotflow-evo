@@ -933,6 +933,14 @@ export class IframeReaderBridge {
         return this.reconnectPromise;
     }
 
+    /**
+     * ZotFlow Evo: the kind of document the reader was last opened with, or
+     * undefined before the first one.
+     */
+    public get documentType(): CreateReaderOptions["type"] | undefined {
+        return this._readerOpts?.type;
+    }
+
     public get state(): BridgeState {
         return this._state;
     }

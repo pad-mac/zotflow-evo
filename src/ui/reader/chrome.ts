@@ -1,6 +1,7 @@
 /**
  * ZotFlow Evo (fork): reader chrome the user toggles from Obsidian — the
- * reader toolbar and the note strip beside a PDF — and the theme refresh.
+ * reader toolbar and the note strip beside a PDF or a snapshot — and the
+ * theme refresh.
  *
  * The fork's reader-view logic lives here so the upstream view files only
  * gain a few calls into this module. See FORK.md.
@@ -42,6 +43,18 @@ export type NoteStripSubject =
 /** Fires after a reader chrome setting changed; every open reader follows. */
 const chromeChanged = new EventBus<[]>();
 
+/** Fires when a reader has opened a document; its view's buttons follow. */
+const readerOpened = new EventBus<[IframeReaderBridge]>();
+
+/** Documents the note strip exists for; beside a snapshot it is a list only. */
+function hasNoteStrip(type: string | undefined): boolean {
+    return type === "pdf" || type === "snapshot";
+}
+
+function canAnchorNoteStrip(type: string | undefined): boolean {
+    return type === "pdf";
+}
+
 /**
  * The chrome settings in the shape `initReader` takes. The note strip comes
  * without its banner, which needs the item's metadata from the worker; the
@@ -74,7 +87,7 @@ export function toggleReaderToolbar() {
     toggleChromeSetting("readerToolbarHidden");
 }
 
-/** Show or hide the note strip beside PDFs in every open reader. */
+/** Show or hide the note strip in every open reader. */
 export function toggleReaderNoteStrip() {
     toggleChromeSetting("readerNoteStripVisible");
 }
@@ -162,9 +175,10 @@ function sendNoteStripBanner(
 }
 
 /**
- * Call once the reader is open: sends the line above the note strip, and
- * takes up what is changed in the strip itself (its "highlights" button), so
- * that it is kept and the other open readers follow.
+ * Call once the reader is open: sends the line above the note strip, takes
+ * up what is changed in the strip itself (its "highlights" button), so that
+ * it is kept and the other open readers follow, and has the view's header
+ * buttons match the kind of document that was opened.
  */
 export function connectNoteStrip(
     bridge: IframeReaderBridge | undefined,
@@ -181,6 +195,7 @@ export function connectNoteStrip(
         });
     }
     sendNoteStripBanner(bridge, subject);
+    readerOpened.emit(bridge);
 }
 
 /** Commands for the toggles, so they can be bound to hotkeys. */
@@ -245,6 +260,11 @@ class ReaderChromeControls {
             toggleReaderToolbar,
         );
         view.register(chromeChanged.subscribe(() => this.apply()));
+        view.register(
+            readerOpened.subscribe((bridge) => {
+                if (bridge === this.getBridge()) this.render();
+            }),
+        );
         this.render();
     }
 
@@ -279,8 +299,16 @@ class ReaderChromeControls {
     /**
      * The icon alone shows the state. The buttons are deliberately not
      * marked `is-active`: that draws them as held down.
+     *
+     * Once a document is open, only the buttons that do something for its
+     * kind are shown: no strip beside an EPUB, no "beside the page" for a
+     * snapshot. Before that (and in a view that never opens one) all are.
      */
     private render() {
+        const type = this.getBridge()?.documentType;
+        this.stripAction.toggle(!type || hasNoteStrip(type));
+        this.stripListAction.toggle(!type || canAnchorNoteStrip(type));
+
         const toolbarHidden = services.settings.readerToolbarHidden;
         setActionIcon(
             this.toolbarAction,

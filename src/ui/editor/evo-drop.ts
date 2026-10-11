@@ -8,7 +8,8 @@
  *   selected text dragged from the page) or the comment (dragged from the
  *   note strip).
  * - `reference` is one template for both (settings): by default author,
- *   year, short title and page in brackets, linked to the place in the PDF.
+ *   year, short title and page in brackets, linked to the place in the
+ *   document (a PDF or a snapshot; a snapshot has no page).
  * - `before` and `after` are set per annotation colour, in one table for
  *   highlights and one for comments.
  *
@@ -63,17 +64,25 @@ export function affixesForColor(
 }
 
 /**
- * The link that opens the PDF at an annotation, or — for selected text that
- * is not an annotation — at its page.
+ * The link that opens the document at an annotation, or — for selected text
+ * that is not an annotation — at its place: the page of a PDF, the passage
+ * of a snapshot.
  */
 export function readerLink(annotation: AnnotationJSON): string {
     const libraryID = annotation.libraryID;
     if (annotation.id) {
         return `obsidian://zotflow?type=open-annotation&libraryID=${libraryID}&key=${annotation.id}`;
     }
-    const navigation = encodeURIComponent(
-        JSON.stringify({ pageIndex: annotation.position?.pageIndex ?? 0 }),
-    );
+    // A place in a PDF has a page; in a snapshot it is a selector, which the
+    // reader takes as it is.
+    const position: unknown = annotation.position;
+    const pageIndex = (position as { pageIndex?: unknown } | undefined)
+        ?.pageIndex;
+    const place =
+        typeof pageIndex === "number" || !position
+            ? { pageIndex: typeof pageIndex === "number" ? pageIndex : 0 }
+            : { position };
+    const navigation = encodeURIComponent(JSON.stringify(place));
     return `obsidian://zotflow?type=open-attachment&libraryID=${libraryID}&key=${annotation.parentItem ?? ""}&navigation=${navigation}`;
 }
 
@@ -150,7 +159,9 @@ async function renderReference(
         {
             text: (annotation.text ?? "").trim(),
             comment: (annotation.comment ?? "").trim(),
-            page: annotation.pageLabel ?? "",
+            // Left out when there is none (a snapshot has no pages), so that
+            // a template can test for it: to Liquid an empty text is true.
+            page: annotation.pageLabel || undefined,
             link: readerLink(annotation),
             color: annotation.color ?? "",
             annotation,

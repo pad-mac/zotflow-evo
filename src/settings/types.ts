@@ -133,11 +133,22 @@ export const DEFAULT_NOTE_STRIP_BANNER =
 /**
  * ZotFlow Evo: default reference after a dropped highlight or comment —
  * author, year, short title and page in brackets, linked to the place in the
- * PDF. `author`, `year`, `shortTitle` and `title` are shortcuts the template
- * gets next to `item`; a missing author or year leaves no stray separator.
+ * document. `author`, `year`, `shortTitle` and `title` are shortcuts the
+ * template gets next to `item`; a missing author or year leaves no stray
+ * separator, and neither does a missing page (a snapshot has none).
  */
 export const DEFAULT_DROP_LINK_TEMPLATE =
-    "([{% if author %}{{ author }} - {% endif %}{% if year %}{{ year }} - {% endif %}{{ shortTitle }}, p. {{ page }}]({{ link }}))";
+    "([{% if author %}{{ author }} - {% endif %}{% if year %}{{ year }} - {% endif %}{{ shortTitle }}{% if page %}, p. {{ page }}{% endif %}]({{ link }}))";
+
+/**
+ * ZotFlow Evo: earlier defaults of the reference template. A stored
+ * template equal to one of these was never changed by the user and is
+ * replaced by the current default (settings/evo-upgrade.ts).
+ */
+export const PREVIOUS_DROP_LINK_TEMPLATES: readonly string[] = [
+    // 1.7.1-beta.4: printed ", p. " for a snapshot, which has no pages.
+    "([{% if author %}{{ author }} - {% endif %}{% if year %}{{ year }} - {% endif %}{{ shortTitle }}, p. {{ page }}]({{ link }}))",
+];
 
 /** Top-level key addressable by Obsidian's declarative settings controls. */
 export type SettingKey = Extract<keyof ZotFlowSettings, string>;

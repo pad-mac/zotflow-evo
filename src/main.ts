@@ -13,6 +13,7 @@ import {
 
 import { ZotFlowSettingTab } from "./settings/settings";
 import { DEFAULT_SETTINGS } from "./settings/types";
+import { upgradeEvoSettings } from "./settings/evo-upgrade";
 import { workerBridge } from "./bridge";
 import { installTestHooks } from "dev/test-hooks";
 import { revokeBlobUrls } from "bundle-assets/inline-assets";
@@ -680,6 +681,9 @@ export default class ZotFlow extends Plugin {
             this.viewStates = {};
             this.customThemes = [];
         }
+
+        // ZotFlow Evo: defaults of an earlier build of the fork
+        upgradeEvoSettings(this.settings);
 
         // Load sensitive credentials from SecretStorage (cross-platform safe)
         loadCredentials(this.settings, this.app.secretStorage);

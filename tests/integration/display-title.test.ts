@@ -603,6 +603,18 @@ describe("ZotFlow Evo: renderTemplate", () => {
         ).toBe("([Vaswani - 2017 - Attention, p. 5](obsidian://x))");
     });
 
+    test("the default reference leaves out the page where there is none (a snapshot)", async () => {
+        const { DEFAULT_DROP_LINK_TEMPLATE } = await import("settings/types");
+        await article("ARTICLE1", {}, { shortTitle: "Attention" });
+
+        expect(
+            await service("").renderTemplate(USER_ID, "ARTICLE1", DEFAULT_DROP_LINK_TEMPLATE, {
+                page: undefined,
+                link: "obsidian://x",
+            }),
+        ).toBe("([Vaswani - 2017 - Attention](obsidian://x))");
+    });
+
     test("the reference falls back to the title, and leaves out a missing author or year", async () => {
         const { DEFAULT_DROP_LINK_TEMPLATE } = await import("settings/types");
         // No short title; square brackets would end the link text early.

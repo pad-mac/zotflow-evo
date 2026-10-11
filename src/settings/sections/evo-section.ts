@@ -43,13 +43,13 @@ export class EvoSection {
                 items: [
                     {
                         name: "Show the note strip",
-                        desc: "A strip beside each PDF page for the comments of its highlights and for notes of your own. Also a button in the reader's header and a command.",
+                        desc: "A strip beside a PDF or a web snapshot for the comments of its highlights and for notes of your own. Also a button in the reader's header and a command.",
                         render: (setting) =>
                             this.readerToggle(setting, "readerNoteStripVisible"),
                     },
                     {
                         name: "As a list",
-                        desc: "The strip is a list of its own, like the reader's annotations sidebar. Off, every entry sits beside its place on the page and the strip scrolls with the pages. Also a button in the reader's header and a command.",
+                        desc: "The strip is a list of its own, like the reader's annotations sidebar. Off, every entry sits beside its place on the page and the strip scrolls with the pages (PDFs only; beside a snapshot it is always a list). Also a button in the reader's header and a command.",
                         render: (setting) =>
                             this.readerToggle(setting, "readerNoteStripList"),
                     },
@@ -118,7 +118,7 @@ export class EvoSection {
                 items: [
                     {
                         name: "Reference",
-                        desc: "LiquidJS template for the reference that follows a highlight or comment dragged from a PDF into a note. Variables: author, year, shortTitle, title, page, link (opens the PDF at that place), text, comment, color, and item as in the display title template. Leave empty for no reference. Holding Shift, Ctrl/Cmd or Alt while dropping gives a citation format instead.",
+                        desc: "LiquidJS template for the reference that follows a highlight or comment dragged from a PDF or a snapshot into a note. Variables: author, year, shortTitle, title, page (missing for a snapshot: {% if page %}…{% endif %}), link (opens the document at that place), text, comment, color, and item as in the display title template. Leave empty for no reference. Holding Shift, Ctrl/Cmd or Alt while dropping gives a citation format instead.",
                         render: (setting) => {
                             setting.addTextArea((area) => {
                                 area.setPlaceholder(DEFAULT_DROP_LINK_TEMPLATE)

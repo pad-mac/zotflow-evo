@@ -160,6 +160,24 @@ describe("readerLink", () => {
                 encodeURIComponent(JSON.stringify({ pageIndex: 11 })),
         );
     });
+
+    it("opens a snapshot at the passage for selected text: its place is a selector, not a page", () => {
+        const selector = {
+            type: "CssSelector",
+            value: "#p3",
+            refinedBy: { type: "TextPositionSelector", start: 5, end: 30 },
+        };
+        const link = readerLink(
+            annotation({
+                id: undefined as unknown as string,
+                position: selector as unknown as AnnotationJSON["position"],
+            }),
+        );
+        expect(link).toBe(
+            "obsidian://zotflow?type=open-attachment&libraryID=7&key=ATTACH01&navigation=" +
+                encodeURIComponent(JSON.stringify({ position: selector })),
+        );
+    });
 });
 
 describe("composeDrop", () => {
@@ -277,6 +295,19 @@ describe("handleReaderDrop", () => {
             link: ANNOTATION_LINK,
             color: "#ffd400",
         });
+    });
+
+    it("gives the template no page for an annotation without one (a snapshot), so it can leave it out", async () => {
+        const e = fakeEditor("");
+        handleReaderDrop(
+            drop(),
+            e.editor,
+            payload({ evoSource: "highlight", annotations: [annotation({ pageLabel: "" })] }),
+        );
+        await vi.waitFor(() => expect(state.rendered).toHaveLength(1));
+        const extra = state.rendered[0]!.extra;
+        expect("page" in extra).toBe(true);
+        expect(extra.page).toBeUndefined();
     });
 
     it("drops comments one per line, each with its own reference and colour text; empty ones are skipped", async () => {

@@ -35,19 +35,22 @@ export interface CreateReaderOptions {
     fontFamily?: string;
     /** ZotFlow Evo: start with the reader toolbar hidden. */
     toolbarHidden?: boolean;
-    /** ZotFlow Evo: the note strip beside a PDF. */
+    /** ZotFlow Evo: the note strip beside a PDF or a snapshot. */
     noteStrip?: ReaderNoteStrip;
     /**
      * Where the document opens, instead of where it was last read (Zotero's
-     * own option; ZotFlow Evo passes it for links into a PDF that is not open yet).
+     * own option; ZotFlow Evo passes it for links into a document that is not open yet).
      */
     location?: ReaderNavigation;
 }
 
-/** ZotFlow Evo: settings of the note strip beside a PDF. */
+/** ZotFlow Evo: settings of the note strip beside a PDF or a snapshot. */
 export interface ReaderNoteStrip {
     visible?: boolean;
-    /** List mode: comments one below the other, not beside their place on the page. */
+    /**
+     * List mode: comments one below the other, not beside their place on the
+     * page. Beside a snapshot the strip is always a list.
+     */
     collapsed?: boolean;
     /** Width in pixels. */
     width?: number;
