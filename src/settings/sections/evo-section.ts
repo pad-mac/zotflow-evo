@@ -1,14 +1,13 @@
 /**
  * ZotFlow Evo (fork): settings for what the fork adds — the note strip beside
- * a PDF, dragging comments and highlights into notes, automatic sync.
+ * a PDF or a snapshot, dragging comments and highlights into notes, the
+ * library browser, automatic sync.
  * See FORK.md.
  */
 import { notifyReaderChromeChanged } from "ui/reader/chrome";
 import { ANNOTATION_COLORS } from "ui/editor/evo-drop";
-import {
-    DEFAULT_DROP_LINK_TEMPLATE,
-    DEFAULT_NOTE_STRIP_BANNER,
-} from "settings/types";
+import { DEFAULT_DROP_LINK_TEMPLATE } from "settings/types";
+import { DEFAULT_BOOK_SEARCH_URL } from "utils/evo-library-model";
 
 import type ZotFlow from "main";
 import type {
@@ -45,7 +44,10 @@ export class EvoSection {
                         name: "Show the note strip",
                         desc: "A strip beside a PDF or a web snapshot for the comments of its highlights and for notes of your own. Also a button in the reader's header and a command.",
                         render: (setting) =>
-                            this.readerToggle(setting, "readerNoteStripVisible"),
+                            this.readerToggle(
+                                setting,
+                                "readerNoteStripVisible",
+                            ),
                     },
                     {
                         name: "As a list",
@@ -64,7 +66,7 @@ export class EvoSection {
                     },
                     {
                         name: "Width",
-                        desc: `Width of the note strip in pixels (${STRIP_WIDTH_MIN} to ${STRIP_WIDTH_MAX}).`,
+                        desc: `Width of the note strip in pixels (${STRIP_WIDTH_MIN} to ${STRIP_WIDTH_MAX}). Also set by dragging the strip's edge in the reader.`,
                         render: (setting) => {
                             setting.addText((text) => {
                                 text.setValue(
@@ -86,27 +88,6 @@ export class EvoSection {
                                     notifyReaderChromeChanged();
                                     await this.plugin.saveSettings();
                                 });
-                            });
-                        },
-                    },
-                    {
-                        name: "Banner",
-                        desc: "LiquidJS template for the line pinned above the note strip, with the item variables of the display title template (item.creatorSummary, item.year, item.title, item.publicationTitle, item.bookTitle, …). Leave empty for no banner.",
-                        render: (setting) => {
-                            setting.addTextArea((area) => {
-                                area.setPlaceholder(DEFAULT_NOTE_STRIP_BANNER)
-                                    .setValue(
-                                        this.plugin.settings
-                                            .readerNoteStripBanner,
-                                    )
-                                    .onChange(async (value) => {
-                                        this.plugin.settings.readerNoteStripBanner =
-                                            value;
-                                        notifyReaderChromeChanged();
-                                        await this.plugin.saveSettings();
-                                    });
-                                area.inputEl.rows = 3;
-                                area.inputEl.addClass("zotflow-evo-wide-input");
                             });
                         },
                     },
@@ -148,6 +129,31 @@ export class EvoSection {
                 "The same for a comment dragged from the note strip.",
                 "evoCommentDrop",
             ),
+            {
+                type: "group",
+                heading: "Library browser",
+                items: [
+                    {
+                        name: "Search for a missing file",
+                        desc: `Where the search button of an item without a PDF, EPUB or snapshot goes; the title, first author and year are appended. Default: ${DEFAULT_BOOK_SEARCH_URL}`,
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder(DEFAULT_BOOK_SEARCH_URL)
+                                    .setValue(
+                                        this.plugin.settings.evoBookSearchUrl,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoBookSearchUrl =
+                                            value.trim() ||
+                                            DEFAULT_BOOK_SEARCH_URL;
+                                        await this.plugin.saveSettings();
+                                    });
+                                text.inputEl.addClass("zotflow-evo-wide-input");
+                            });
+                        },
+                    },
+                ],
+            },
             {
                 type: "group",
                 heading: "Links to source notes",

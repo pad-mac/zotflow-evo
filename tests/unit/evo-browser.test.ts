@@ -16,7 +16,12 @@ import type { App } from "obsidian";
 import type { BrowserNode } from "ui/tree-view/evo-browser";
 
 interface MockState {
-    attachments: { libraryID: number; key: string; itemType: string; raw: { data: { contentType: string } } }[];
+    attachments: {
+        libraryID: number;
+        key: string;
+        itemType: string;
+        raw: { data: { contentType: string; linkMode?: string } };
+    }[];
     item: unknown;
     opened: string[];
     modals: { parent: unknown; choices: string[] }[];
@@ -221,12 +226,38 @@ describe("openItemPrimaryAttachment", () => {
         expect(state.modals).toEqual([]);
     });
 
-    it("asks when there are several", async () => {
-        state.attachments = [file("PDF1", "application/pdf"), file("EPUB", "application/epub+zip"), file("HTML", "text/html")];
+    it("a PDF comes before an EPUB before a snapshot: no question", async () => {
+        state.attachments = [file("HTML", "text/html"), file("EPUB", "application/epub+zip"), file("PDF1", "application/pdf")];
+        state.item = { key: "ITEM" };
+        expect(await openItemPrimaryAttachment(1, "ITEM", app)).toBe(true);
+        expect(state.opened).toEqual(["PDF1"]);
+        expect(state.modals).toEqual([]);
+        state.opened = [];
+        state.attachments = [file("HTML", "text/html"), file("EPUB", "application/epub+zip")];
+        await openItemPrimaryAttachment(1, "ITEM", app);
+        expect(state.opened).toEqual(["EPUB"]);
+    });
+
+    it("a link (Google Books, say) never counts", async () => {
+        state.attachments = [
+            { ...file("LINK", "text/html"), raw: { data: { contentType: "text/html", linkMode: "linked_url" } } },
+            file("SNAP", "text/html"),
+        ];
+        state.item = { key: "ITEM" };
+        expect(await openItemPrimaryAttachment(1, "ITEM", app)).toBe(true);
+        expect(state.opened).toEqual(["SNAP"]);
+        state.opened = [];
+        state.attachments = [{ ...file("LINK", "text/html"), raw: { data: { contentType: "text/html", linkMode: "linked_url" } } }];
+        expect(await openItemPrimaryAttachment(1, "ITEM", app, { quiet: true })).toBe(false);
+        expect(state.opened).toEqual([]);
+    });
+
+    it("asks only between several of the best kind", async () => {
+        state.attachments = [file("PDF1", "application/pdf"), file("EPUB", "application/epub+zip"), file("PDF2", "application/pdf")];
         state.item = { key: "ITEM" };
         expect(await openItemPrimaryAttachment(1, "ITEM", app)).toBe(true);
         expect(state.opened).toEqual([]);
-        expect(state.modals).toEqual([{ parent: state.item, choices: ["PDF1", "EPUB", "HTML"] }]);
+        expect(state.modals).toEqual([{ parent: state.item, choices: ["PDF1", "PDF2"] }]);
     });
 
     it("opens the item itself when it is a file without a parent", async () => {

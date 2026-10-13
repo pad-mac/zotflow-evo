@@ -25,6 +25,8 @@ import { NotePathService } from "./services/note-path";
 import { ConvertService } from "./services/convert";
 import { ItemNoteService } from "./services/item-note";
 import { CslRenderWorkerService } from "./services/csl-render";
+// ZotFlow Evo
+import { EvoLibraryService } from "./services/evo-library";
 import { TaskManager } from "./tasks/manager";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 
@@ -85,6 +87,8 @@ export interface WorkerAPI {
     localTemplate: Exposed<LocalTemplateService>;
     notePath: Exposed<NotePathService>;
     cslRender: Exposed<CslRenderWorkerService>;
+    /** ZotFlow Evo: the library browser's data. */
+    evoLibrary: Exposed<EvoLibraryService>;
     tasks: Exposed<TaskManager>;
     updateSettings(settings: ZotFlowSettings): void;
 
@@ -135,6 +139,7 @@ let _convert: ConvertService | undefined;
 let _documentWorker: DocumentWorkerService | undefined;
 let _enhancementResources: EnhancementResourceService | undefined;
 let _cslRender: CslRenderWorkerService | undefined;
+let _evoLibrary: EvoLibraryService | undefined;
 let _taskManager: TaskManager | undefined;
 let _currentSettings: ZotFlowSettings | undefined;
 
@@ -284,6 +289,7 @@ const exposedApi: WorkerAPI = {
             finishStage("Create document and conversion services");
 
             _cslRender = new CslRenderWorkerService(settings);
+            _evoLibrary = new EvoLibraryService(settings, _library);
             finishStage("Create CSL service");
 
             _template = new LibraryTemplateService(
@@ -606,6 +612,16 @@ const exposedApi: WorkerAPI = {
         return Comlink.proxy(_cslRender);
     },
 
+    get evoLibrary() {
+        if (!_evoLibrary)
+            throw new ZotFlowError(
+                ZotFlowErrorCode.UNKNOWN,
+                "Worker",
+                "Worker not initialized",
+            );
+        return Comlink.proxy(_evoLibrary);
+    },
+
     dispose: () => {
         _editQueue?.dispose();
         _displayTitle?.dispose();
@@ -709,6 +725,7 @@ const exposedApi: WorkerAPI = {
         _tag!.updateSettings(settings);
         _documentWorker!.updateSettings(settings);
         _cslRender!.updateSettings(settings);
+        _evoLibrary?.updateSettings(settings);
         _currentSettings = settings;
     },
 };

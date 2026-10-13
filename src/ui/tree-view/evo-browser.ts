@@ -12,18 +12,15 @@ import { services } from "services/services";
 import { ZOTFLOW_SOURCE_LINKS_MIME } from "ui/editor/evo-link-drop";
 import { AttachmentSelectModal } from "ui/modals/attachment-suggest";
 import { openAttachment } from "utils/viewer";
+import {
+    attachmentKind,
+    choosePrimaryAttachment,
+} from "utils/evo-library-model";
 
 import type { App } from "obsidian";
 import type { IDBZoteroItem } from "types/db-schema";
 import type { AttachmentData } from "types/zotero-item";
 import type { SourceLinksPayload } from "ui/editor/evo-link-drop";
-
-/** What the reader can show. */
-const READER_CONTENT_TYPES = new Set([
-    "application/pdf",
-    "application/epub+zip",
-    "text/html",
-]);
 
 /** The part of a tree node (react-arborist's `NodeApi`) this module uses. */
 export interface BrowserNode {
@@ -84,12 +81,9 @@ function hasSourceNote(node: BrowserNode): boolean {
  * the dragged one is among them, else the dragged one alone. Attachments
  * and notes have no source note and are left out.
  */
-export function draggedItems(
-    node: BrowserNode,
-): SourceLinksPayload["items"] {
+export function draggedItems(node: BrowserNode): SourceLinksPayload["items"] {
     const selected = node.tree.selectedNodes;
-    const nodes =
-        node.isSelected && selected.length > 1 ? selected : [node];
+    const nodes = node.isSelected && selected.length > 1 ? selected : [node];
     return nodes
         .filter(hasSourceNote)
         .map((n) => ({ libraryID: n.data.libraryID, key: n.data.key }));
@@ -112,9 +106,11 @@ export function setSourceLinkDrag(
 }
 
 /**
- * Open what an item stands for: its PDF, EPUB or web snapshot. With several
- * of them, ask which. Resolves to whether there was something to open;
- * `quiet` leaves out the notice when there was not.
+ * Open what an item stands for: its PDF, EPUB or web snapshot. A PDF comes
+ * before an EPUB before a snapshot, and a link (to Google Books, say) never
+ * counts; only when there are several of the best kind is the user asked
+ * which (`choosePrimaryAttachment()`). Resolves to whether there was
+ * something to open; `quiet` leaves out the notice when there was not.
  */
 export async function openItemPrimaryAttachment(
     libraryID: number,
@@ -122,25 +118,30 @@ export async function openItemPrimaryAttachment(
     app: App,
     { quiet = false }: { quiet?: boolean } = {},
 ): Promise<boolean> {
-    const readable = (a: IDBZoteroItem<AttachmentData>) =>
-        READER_CONTENT_TYPES.has(a.raw?.data?.contentType ?? "");
-    const attachments = (
-        (await workerBridge.dbHelper.getAttachments(
-            libraryID,
-            key,
-        )) as IDBZoteroItem<AttachmentData>[]
-    ).filter(readable);
+    const kindOf = (a: IDBZoteroItem<AttachmentData>) =>
+        attachmentKind({
+            contentType: a.raw?.data?.contentType,
+            linkMode: a.raw?.data?.linkMode,
+        });
+    const attachments = (await workerBridge.dbHelper.getAttachments(
+        libraryID,
+        key,
+    )) as IDBZoteroItem<AttachmentData>[];
+    const { primary, choices } = choosePrimaryAttachment(attachments, kindOf);
 
-    const only = attachments[0];
-    if (attachments.length === 1 && only) {
-        await openAttachment(only.libraryID, only.key, app);
+    if (primary) {
+        await openAttachment(primary.libraryID, primary.key, app);
         return true;
     }
 
     const item = await workerBridge.dbHelper.getItem(libraryID, key);
-    if (attachments.length === 0) {
+    if (!choices.length) {
         // The item may itself be the file (a PDF without a parent item).
-        if (item?.itemType === "attachment" && readable(item)) {
+        if (
+            item?.itemType === "attachment" &&
+            kindOf(item) !== "link" &&
+            kindOf(item) !== "other"
+        ) {
             await openAttachment(libraryID, key, app);
             return true;
         }
@@ -161,6 +162,6 @@ export async function openItemPrimaryAttachment(
         }
         return false;
     }
-    new AttachmentSelectModal(app, item, attachments).open();
+    new AttachmentSelectModal(app, item, choices).open();
     return true;
 }

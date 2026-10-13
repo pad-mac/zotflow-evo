@@ -44,6 +44,11 @@ export interface CreateReaderOptions {
     location?: ReaderNavigation;
 }
 
+/** ZotFlow Evo: what the head of the note strip shows. */
+export type NoteStripBanner =
+    | string
+    | { authors?: string; year?: string; title?: string };
+
 /** ZotFlow Evo: settings of the note strip beside a PDF or a snapshot. */
 export interface ReaderNoteStrip {
     visible?: boolean;
@@ -54,8 +59,11 @@ export interface ReaderNoteStrip {
     collapsed?: boolean;
     /** Width in pixels. */
     width?: number;
-    /** One line of text pinned above the strip; "" for none. */
-    banner?: string;
+    /**
+     * Pinned above the strip: the authors and year on one line, the title on
+     * the next. A text is shown as the title; "" for none.
+     */
+    banner?: NoteStripBanner;
     /** List the highlights themselves too, not only comments. */
     highlights?: boolean;
 }

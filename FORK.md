@@ -39,18 +39,22 @@ Keep this list complete. One entry per change, newest last.
 | Reader toolbar toggle: a header button per reader view, a command, a setting (`readerToolbarHidden`) | `src/ui/reader/chrome.ts` (new, all the logic). Hooks: `attachReaderChromeControls()` in the constructors and `...readerChromeOptions()` in the `initReader` options of `src/ui/reader/view.ts` and `local-view.ts`; `setToolbarHidden()` in `src/ui/reader/bridge.ts`; `registerReaderChromeCommands()` in `src/main.ts`; the key in `src/settings/types.ts`; the option and child-API types in `src/types/zotero-reader.d.ts` | Requested: hide the reader toolbar from the view header. (A comment popup switch existed from beta.2 to beta.3; removed, because the note strip keeps the popup away for PDFs by itself.) |
 | Reader theme refresh on every `css-change`, not only on a light/dark flip | `requestReaderThemeRefresh()` in `src/ui/reader/chrome.ts`; one `else if` in the `css-change` handler of `view.ts` and `local-view.ts` | A theme, snippet or Style Settings change keeps the scheme but changes the colours. |
 | Header toggle buttons no longer get `is-active` | `render()` in `src/ui/reader/chrome.ts` | `is-active` drew them as held down; the icon alone shows the state. |
-| Note strip beside PDFs and snapshots: two more header buttons (strip on/off, list or beside the page), three commands, settings `readerNoteStripVisible`, `readerNoteStripList`, `readerNoteStripHighlights`, `readerNoteStripWidth`, `readerNoteStripBanner` | `src/ui/reader/chrome.ts` (all the logic; `readerChromeOptions()` also returns `noteStrip`). Hooks: third argument of `attachReaderChromeControls()` (what the view shows) and `connectNoteStrip()` after `initReader` in `view.ts` and `local-view.ts`; `setNoteStrip()` and the `documentType` getter in `bridge.ts`; types `ReaderNoteStrip`, the `noteStrip` option, the `setNoteStrip` child API and the `noteStripChanged` event in `src/types/zotero-reader.d.ts` | The strip itself is in the reader (below). The banner is a LiquidJS template rendered in the worker with the item's metadata, so it is sent after the reader is open rather than awaited while the view sets up. The "highlights" switch is changed in the strip itself; the reader reports it (`noteStripChanged`) and `connectNoteStrip()` saves it and passes it on to the other open readers. `readerNoteStripList` replaced `readerNoteStripCollapsed` in beta.4 so that the list became the default for existing installs too. Once a document is open the header shows only the buttons that do something for its kind (`render()`; told by `connectNoteStrip()` through `readerOpened`): no strip button for an EPUB, no "beside the page" button for a snapshot. |
-| `DisplayTitleService.renderTemplate()`: render any one-off template for an item, with the shortcuts `author`, `year`, `shortTitle`, `title` beside `item` | `src/worker/services/display-title.ts` (the method and `referenceShortcuts()`) | Used for the strip banner and the reference after a dropped highlight or comment. The shortcuts are ready to be a markdown link's text (square brackets become round) and are undefined when missing, so `{% if author %}` works. |
+| Note strip beside PDFs and snapshots: two more header buttons (strip on/off, list or beside the page), three commands, settings `readerNoteStripVisible`, `readerNoteStripList`, `readerNoteStripHighlights`, `readerNoteStripWidth` | `src/ui/reader/chrome.ts` (all the logic; `readerChromeOptions()` also returns `noteStrip`). Hooks: third argument of `attachReaderChromeControls()` (what the view shows) and `connectNoteStrip()` after `initReader` in `view.ts` and `local-view.ts`; `setNoteStrip()` and the `documentType` getter in `bridge.ts`; types `ReaderNoteStrip`, the `noteStrip` option, the `setNoteStrip` child API and the `noteStripChanged` event in `src/types/zotero-reader.d.ts` | The strip itself is in the reader (below). Its head (`banner`: the item's main creators with full names, year, title; `itemBanner()` in `worker/services/evo-library.ts`) is read in the worker, so it is sent after the reader is open rather than awaited while the view sets up; a local file shows its name. Until beta.5 the head was one line from a LiquidJS template (`readerNoteStripBanner`, no longer read or offered). The "highlights" switch and the width (dragging the strip's edge) are changed in the strip itself; the reader reports them (`noteStripChanged`) and `connectNoteStrip()` saves them and passes them on to the other open readers. `readerNoteStripList` replaced `readerNoteStripCollapsed` in beta.4 so that the list became the default for existing installs too. Once a document is open the header shows only the buttons that do something for its kind (`render()`; told by `connectNoteStrip()` through `readerOpened`): no strip button for an EPUB, no "beside the page" button for a snapshot. |
+| `DisplayTitleService.renderTemplate()`: render any one-off template for an item, with the shortcuts `author`, `year`, `shortTitle`, `title` beside `item` | `src/worker/services/display-title.ts` (the method and `referenceShortcuts()`) | Used for the reference after a dropped highlight or comment. The shortcuts are ready to be a markdown link's text (square brackets become round) and are undefined when missing, so `{% if author %}` works. |
 | Fork settings page "ZotFlow Evo" | `src/settings/sections/evo-section.ts` (new); one page entry in `src/settings/settings.ts`; two classes at the end of `styles.css` | Note strip, drop templates, automatic sync. |
 | Drops from the reader into a note: `before + body + reference + after`. Body: a highlight's text in quotation marks, or the comment. Reference: one LiquidJS template for both (`evoDropLinkTemplate`). Before/after: per annotation colour, one table for highlights (`evoHighlightDrop`) and one for comments (`evoCommentDrop`) | `src/ui/editor/evo-drop.ts` (new, all the logic). Hooks: `handleReaderDrop()` call and the `evoSource` field in `src/ui/editor/citation-helper.ts`; fourth argument `extra` and `evoSource` in `handleSetDataTransferAnnotations` of `bridge.ts`; type `ReaderDragExtra` | Requested. A drop with Shift, Ctrl/Cmd or Alt held goes to upstream's citation formats as before. `evo-drop.ts` imports the worker bridge lazily because `citation-helper.ts` is also loaded by unit tests that have no bridge. The default reference leaves the page out where there is none (a snapshot): the template gets no `page` then, and `{% if page %}` is false. A stored template equal to an earlier default is replaced by the current one when the settings load (`src/settings/evo-upgrade.ts`, called in `loadSettings()` of `src/main.ts`; earlier defaults are listed in `PREVIOUS_DROP_LINK_TEMPLATES`). |
 | A reader opens in a new tab in a pane at least 500 px wide: the current pane if it is, else the most recently used one that is | `src/utils/evo-reader-leaf.ts` (new); one line in `openAttachment()` in `src/utils/viewer.ts` | Requested. Uses `leaf.activeTime` (not in the public typings) for "most recently used", and the `.workspace-tabs` element for the width. Skipped on mobile. |
-| Library tree as a tab in the main area: command `open-library-browser-tab`. There a click selects an item (Ctrl/Cmd and Shift select several), a double click opens its PDF, EPUB or snapshot (asking when there are several), and dragged items are dropped as links to their source notes | `src/ui/evo-workspace.ts` (command), `src/ui/tree-view/evo-browser.ts` (selection, what a drag carries, opening), `src/ui/editor/evo-link-drop.ts` (the drop: one link at the cursor, further ones each on a new line that continues a list or quote), all new. Hooks: `registerEvoWorkspaceCommands()` in `src/main.ts`; the start of `handleOnClick`, of `handleDoubleClick` and of `handleDragStart` (plus the drag label) in `src/ui/tree-view/Node.tsx`; `disableMultiSelection={false}` in `src/ui/tree-view/TreeView.tsx`; `handleSourceLinkDrop()` call in `citation-helper.ts` | Requested. Whether a tree is "in a tab" is read from the DOM (not inside `.mod-left-split` / `.mod-right-split` / a drawer), so the sidebar tree behaves as upstream: there a drag still drops a citation. In the tab the click handler stops the event, because react-arborist's own row click would select that one item alone. An item without a source note gets one when its link is dropped (`ensureNotePath`, as upstream's wikilink citation does). |
+| Library browser: a tab laid out like Zotero's window — libraries and nested collections on the left, a table of the items in the middle (columns chosen by right-clicking the header, sorted by clicking it, resized by dragging its edges; a filter; optionally the items of sub-collections too), the focused item on the right (title; first two authors' full names and year; publication; abstract; below a line the annotations of the file it opens, as cards like the reader's note strip). Command `open-library-browser-tab` ("Open Zotero library in a tab") now opens it. A click selects (Ctrl/Cmd, Shift, arrows), a double click or Enter opens the item, dragged rows drop links to their source notes, a right-click offers open / source note / search / show in Zotero. An item without a PDF, EPUB or snapshot has a search button in the attachment column: Anna's Archive (setting `evoBookSearchUrl`) for "title first-author year" in Obsidian's web viewer, in a pane beside the browser (in the system browser when the web viewer core plugin is off or on mobile). Settings `evoLibraryColumns`, `evoCollectionColumns`, `evoColumnWidths`, `evoLibrarySort`, `evoLibrarySubcollections`, `evoLibraryPanes`, `evoBookSearchUrl` | `src/ui/evo-library/` (all new: `views.tsx` the three Obsidian views and their registration, `LibraryBrowser.tsx`, `CollectionPane.tsx`, `ItemTable.tsx` (only the rows on screen are drawn), `ItemDetails.tsx`, `parts.tsx` (icon, markdown, annotation card, change hook), `useItems.ts`, `menus.ts`, `actions.ts`); `src/utils/evo-library-model.ts` (the rules, tested); `src/worker/services/evo-library.ts` (the data). Hooks: `registerEvoLibrary()` in `src/main.ts`; the `evoLibrary` service in `src/worker/worker.ts` (type, instance, getter, `updateSettings`) and `src/bridge/index.ts`; the keys in `src/settings/types.ts`; styles at the end of `styles.css` | Requested. Data is read in the worker per scope (the collection tree; the rows of a library or collection with attachment and annotation counts; one item's details), never the whole tree, and read again after a sync or an edit (`treeChanged`, `syncFinished`, `annotationChanged`). The view's fields are named `evoScope`/`evoTarget`: `scope` would shadow Obsidian's keymap scope of the view. Anna's Archive changes its domain now and then; hence the setting. |
+| A collection in a tab of its own (for a narrow pane): its name on top, its own table columns, a filter, the sub-collections switch and a button for its annotations. Opened from the library browser and from the sidebar tree by a middle click (a three-finger tap) or Ctrl/Cmd+right-click on a collection, or from its right-click menu ("Open in new tab") | `src/ui/evo-library/CollectionTab.tsx`, `views.tsx` (`EvoCollectionView`), `tree-hooks.ts` (the sidebar tree). Hooks in `src/ui/tree-view/Node.tsx`: start of `handleContextMenu` (`openCollectionFromTree`, `addCollectionMenuItems`) and an `onAuxClick` on the node | Requested. On macOS Ctrl+click is a right-click with Ctrl held, so it opens the tab too. |
+| Annotation browser: every highlight and comment of a collection (or a library), grouped by item, colour or tag, then ordered by item (title or date added) or colour, then page; a colour filter; the item named after each annotation where the heading is not the item. Cards open the document at the annotation and drag into notes like the strip's. Setting `evoAnnotationLayout` | `src/ui/evo-library/AnnotationBrowser.tsx`, `views.tsx` (`EvoAnnotationsView`), `groupAnnotations()` in `utils/evo-library-model.ts`, `collectionAnnotations()` in the worker service | Requested. Tags are the annotations' own tags; one with several tags is listed under each, untagged ones under "No tag". All attachments of an item count, not only the primary one. |
+| What "open an item" opens: a PDF before an EPUB before a web snapshot; a link (Google Books) or other file never counts; only several of the best kind (two PDFs; two EPUBs and no PDF; two snapshots and neither) ask which | `choosePrimaryAttachment()` in `src/utils/evo-library-model.ts`, used by `openItemPrimaryAttachment()` in `src/ui/tree-view/evo-browser.ts` (double click in the browser, source-note links) and by the details pane | Requested. Until beta.5 any two of PDF/EPUB/snapshot asked. |
+| The old library tree as a tab (beta.3–beta.5): a click selects, a double click opens, drags drop source-note links | `src/ui/tree-view/evo-browser.ts`; hooks at the start of `handleOnClick`, `handleDoubleClick`, `handleDragStart` in `Node.tsx`; `disableMultiSelection={false}` in `TreeView.tsx`; `handleSourceLinkDrop()` in `citation-helper.ts`; the drop in `src/ui/editor/evo-link-drop.ts` | Superseded by the library browser; the command no longer opens it, but a tree tab restored from an older workspace still behaves so. The drop of source-note links is shared with the browser. |
 | A click on a link to a source note opens the item's PDF, EPUB or snapshot instead of the note. Setting `evoSourceLinksOpenAttachment` (on) | `src/ui/evo-source-links.ts` (new): wraps `workspace.openLinkText` with monkey-around. Hook: `registerSourceNoteLinks()` in `src/main.ts` | Requested. Only a plain click on a plain link: a modifier click (Obsidian's "new tab / split / window"), a link to a heading or block, a call without a source path (quick switcher) and an item with nothing to open all open the note as before. Source notes are recognised by their frontmatter (`zotero-key` + `library-id`, or `zotflow-local-attachment`). |
 | A link into a document that is not open yet lands on its target | `pendingNavigation` and `finishPendingNavigation()` in `view.ts` and `local-view.ts`; `readerNavigate()` keeps the target while the reader is not ready and it is passed as Zotero's `location` option to `initReader`; the option's type in `src/types/zotero-reader.d.ts` | Upstream's `readerNavigate()` returned when the bridge did not exist yet, which is always the case right after the view is created, so a page or annotation link opened the PDF at the last reading position. |
 | Automatic sync both ways. Pull: Zotero's streaming service (`wss://stream.zotero.org/`) names the changed library, which is synced; one catch-up sync after every (re)connect. Push: 5 s after the last local change, at once when a reader is closed. Settings `autoSyncPull`, `autoSyncPush` (both on) | `src/services/evo-auto-sync.ts` (new: the logic in `EvoAutoSync`, the wiring in `startEvoAutoSync()`). Hooks: `startEvoAutoSync()` in the `onLayoutReady` callback and `refreshEvoAutoSync()` in `saveSettings()` / `onExternalSettingsChange()` of `src/main.ts`; `noteLocalEdit()` in `handleAnnotationsSaved` / `handleAnnotationsDeleted` of `view.ts`; `KeyService.getLibraryVersion()` in `src/worker/services/key.ts` | Requested. Zotero announces this device's own upload too; it is recognised by comparing the announced version with the local one, as Zotero's own client does (`xpcom/streamer.js`). Upstream's unused `autoSync` / `syncInterval` settings are left alone. |
 | Quiet syncs: an optional `quiet` flag from `startSync()` down to `SyncService.startSync()` suppresses the "Sync completed successfully!" notice | `src/ui/start-sync.ts`, `src/bridge/index.ts`, `src/worker/worker.ts`, `src/worker/tasks/manager.ts`, `src/worker/tasks/impl/sync-task.ts`, `src/worker/services/sync.ts` (one parameter each) | Automatic syncs run often; only their failures are reported. |
 
-Known limits and open checks of these (as of 1.7.1-beta.5):
+Known limits and open checks of these (as of 1.7.1-beta.6):
 
 - Automatic sync was written against Zotero's own streaming client and is
   covered by unit tests with a fake stream; it had not yet been run against
@@ -68,7 +72,14 @@ Known limits and open checks of these (as of 1.7.1-beta.5):
   render. It can be switched off in the settings.
 - `readerCommentPopupSuppressed`, `readerNoteStripCollapsed` and
   `evoHighlightDropTemplate` may still sit in a `data.json` written by
-  beta.2 or beta.3. Nothing reads them.
+  beta.2 or beta.3, and `readerNoteStripBanner` stays in it. Nothing reads
+  them.
+- The library browser, the collection tabs and the annotation browser were
+  checked in a browser rig with stand-ins for Obsidian (icons, menus,
+  markdown) and the worker; Obsidian's real icons, menus, styles and web
+  viewer have to be looked at in Obsidian. The web viewer is opened with
+  view type `webviewer` and state `{ url, navigate }`, which is not in the
+  public API.
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
@@ -97,8 +108,8 @@ appearance and read-aloud popups keep their 41px offset.
   every entry sits beside its place on the page and the strip moves with
   the pages. The same entries are drawn in both. Beside a snapshot there
   is only the list (`canAnchor` of the host).
-- **Where it lives.** Two iframes: a pinned head (title line, buttons,
-  colour filters) and the strip (`strip-host.js`). Beside a PDF they are
+- **Where it lives.** Two iframes: a pinned head (authors and year, title,
+  buttons, colour filters) and the strip (`strip-host.js`). Beside a PDF they are
   inside the PDF view's own document, beside the scrolling area
   (`#viewerContainer`), which is made narrower (`strip-host-pdf.js`). In
   that document because only there can the browser move the anchored strip
@@ -126,9 +137,16 @@ appearance and read-aloud popups keep their 41px offset.
   with two bars in the annotation's colour. With "highlights" on, also
   what was marked on the page (full text), with one bar; a highlight
   without a comment is otherwise listed only while it is open. The
-  document's outline as headings between them (for a snapshot: its HTML
-  headings, as the reader's outline tab lists them). Markdown is stored as
-  the plain text of the comment.
+  document's outline as headings between them, indented by their depth
+  (for a snapshot: its HTML headings, as the reader's outline tab lists
+  them). As a list a heading with something under it can be folded (its
+  arrow; with Alt all headings of its depth); folded, it hides everything
+  up to the next heading of its depth or above (`foldEntries()`). Folding
+  is per document and not kept. Markdown is stored as the plain text of
+  the comment.
+- **The head.** Two lines: all main creators (full names) with the year
+  at the right end in tabular figures, the authors fading out before it
+  when they do not fit; then the full title, bold, same size and colour.
 - **Order.** Zotero's sort index, as in Zotero's own sidebar. For a PDF
   that is page, offset in the page's text, height on the page, so
   two-column pages read in the right order; for a snapshot the number of
@@ -143,6 +161,17 @@ appearance and read-aloud popups keep their 41px offset.
   opens a comment line for it. A note starts as a draft and becomes a
   Zotero note annotation with its first character; left empty it is
   deleted again. Alt+1 … Alt+8 set the colour of the open entry.
+  Shift+Enter starts a new note right under the open entry (under a
+  highlight's comment: a note of its own after the highlight). Delete or
+  Backspace in the empty comment of an annotation deletes the annotation,
+  as long as nothing was typed since it was opened (so emptying a comment
+  with Backspace never deletes the highlight).
+- **Selecting text.** A plain press on an entry's text drags it (into a
+  note); with Alt held it selects the text instead, and a click that ends
+  a selection does not open the entry.
+- **Width.** The edge towards the document is a handle; dragging it moves
+  only the strip while dragging and fits the document once at the end.
+  The width is kept for every reader (`noteStripChanged`).
 - **Where a new note goes (list).** A click on empty space puts it after
   the entry above the click (under a highlight, between two entries, below
   the last one). The + button puts it after the last thing listed on the
@@ -162,12 +191,16 @@ appearance and read-aloud popups keep their 41px offset.
   at that height (`spotAt()`).
 - **Text under the page number.** The number stands in front of the first
   line and is not part of the text; the first line is indented by its
-  width (`--zf-evo-indent`, measured per entry): `text-indent` for plain
+  width (`--zf-evo-indent`, measured per entry and again whenever the
+  number's width changes — a number measured before the strip was laid out
+  or its font arrived let the text run over it): `text-indent` for plain
   text and the editor's first line, a zero-height float for rendered
   markdown.
 - **Anchored layout.** Entries sit on 20 px lines counted from the top of
-  each page. One that would run into the next is cut to two lines and
-  faded; entries on adjacent lines are pushed down (`layoutCards()`). The
+  each page and keep their full height while they have room. One that
+  would run into the next is cut where they meet and faded; if the next
+  starts on the same line (or was pushed onto it), the first keeps up to
+  two lines and the next moves below it (`layoutCards()`). The
   open entry is shown in full over the ones below. `LINE_HEIGHT` and
   `--zf-evo-line` in `_evo.scss` must agree.
 - **Keys.** Outside a text box, keys pressed in the strip go to the

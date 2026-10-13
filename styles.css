@@ -3823,3 +3823,659 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-family: var(--font-monospace);
     font-size: var(--font-ui-smaller);
 }
+
+/* ===================================================================== */
+/* ZotFlow Evo (fork): library browser, collection tabs, annotation      */
+/* browser (src/ui/evo-library/). See FORK.md.                           */
+/* ===================================================================== */
+
+.zotflow-evo-view.view-content {
+    padding: 0;
+    overflow: hidden;
+}
+
+.zotflow-evo-view {
+    --zotflow-evo-row: 26px;
+    --zotflow-evo-line: 20px;
+    --zotflow-evo-gutter: 18px;
+}
+
+.zotflow-evo-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zotflow-evo-icon svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* ----- The three panes ----- */
+
+.zotflow-evo-browser {
+    display: grid;
+    grid-template-columns:
+        var(--zotflow-evo-pane-collections, 240px) 4px minmax(200px, 1fr)
+        4px var(--zotflow-evo-pane-details, 360px);
+    height: 100%;
+    min-height: 0;
+}
+
+.zotflow-evo-pane {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.zotflow-evo-pane.is-collections {
+    overflow-y: auto;
+    padding: 6px 0;
+    background-color: var(--background-secondary);
+}
+
+.zotflow-evo-pane.is-items {
+    display: flex;
+    flex-direction: column;
+}
+
+.zotflow-evo-split {
+    cursor: col-resize;
+    background-color: var(--background-modifier-border);
+    background-clip: content-box;
+    padding: 0 1.5px;
+    touch-action: none;
+}
+
+.zotflow-evo-split:hover {
+    background-color: var(--interactive-accent);
+    padding: 0;
+}
+
+/* ----- Collections ----- */
+
+.zotflow-evo-coll {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding-inline: calc(var(--zotflow-evo-depth, 0) * 14px + 4px) 8px;
+    border-radius: var(--radius-s);
+    margin: 0 4px;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+}
+
+.zotflow-evo-coll:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-evo-coll.is-current {
+    background-color: var(--background-modifier-active-hover);
+    color: var(--text-accent);
+}
+
+.zotflow-evo-coll.is-library {
+    font-weight: var(--font-semibold);
+}
+
+.zotflow-evo-coll-toggle {
+    flex: none;
+    display: inline-flex;
+    width: 16px;
+    justify-content: center;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+
+.zotflow-evo-coll-toggle.is-empty {
+    cursor: default;
+}
+
+.zotflow-evo-coll-toggle svg {
+    width: 12px;
+    height: 12px;
+}
+
+.zotflow-evo-coll-icon {
+    flex: none;
+    color: var(--text-muted);
+}
+
+.zotflow-evo-coll-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ----- Toolbar above a table ----- */
+
+.zotflow-evo-toolbar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-evo-toolbar.is-wrapping {
+    flex-wrap: wrap;
+}
+
+.zotflow-evo-toolbar-title {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.zotflow-evo-toolbar-count {
+    flex: none;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-filter {
+    flex: 1 1 120px;
+    min-width: 80px;
+    max-width: 260px;
+    margin-inline-start: auto;
+    height: 26px;
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-evo-tool {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-s);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.zotflow-evo-tool:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.zotflow-evo-tool.is-on {
+    color: var(--interactive-accent);
+}
+
+/* ----- The table ----- */
+
+.zotflow-evo-table {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-evo-thead {
+    display: flex;
+    flex: none;
+    height: var(--zotflow-evo-row);
+    overflow: hidden;
+    scrollbar-gutter: stable;
+    border-bottom: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.zotflow-evo-th,
+.zotflow-evo-td {
+    position: relative;
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 0 8px;
+    overflow: hidden;
+    line-height: var(--zotflow-evo-row);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.zotflow-evo-th {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    cursor: pointer;
+}
+
+.zotflow-evo-th:hover {
+    color: var(--text-normal);
+}
+
+.zotflow-evo-th.is-sorted {
+    color: var(--text-normal);
+    font-weight: var(--font-semibold);
+}
+
+.zotflow-evo-th-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.zotflow-evo-th-sort svg {
+    width: 12px;
+    height: 12px;
+}
+
+.zotflow-evo-th-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.zotflow-evo-th-resize:hover {
+    background-color: var(--interactive-accent);
+}
+
+.zotflow-evo-th + .zotflow-evo-th {
+    border-left: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-evo-th.is-narrow,
+.zotflow-evo-td.is-narrow {
+    justify-content: center;
+    padding: 0 4px;
+    text-align: center;
+}
+
+/* Column widths: the title takes what is left. */
+.zotflow-evo-col-title { flex: 1 1 var(--zotflow-evo-col-title, 320px); min-width: 80px; }
+.zotflow-evo-col-creator { flex: 0 0 var(--zotflow-evo-col-creator, 160px); }
+.zotflow-evo-col-year { flex: 0 0 var(--zotflow-evo-col-year, 56px); }
+.zotflow-evo-col-itemType { flex: 0 0 var(--zotflow-evo-col-itemType, 120px); }
+.zotflow-evo-col-publication { flex: 0 0 var(--zotflow-evo-col-publication, 180px); }
+.zotflow-evo-col-publisher { flex: 0 0 var(--zotflow-evo-col-publisher, 140px); }
+.zotflow-evo-col-dateAdded { flex: 0 0 var(--zotflow-evo-col-dateAdded, 106px); }
+.zotflow-evo-col-dateModified { flex: 0 0 var(--zotflow-evo-col-dateModified, 106px); }
+.zotflow-evo-col-citationKey { flex: 0 0 var(--zotflow-evo-col-citationKey, 130px); }
+.zotflow-evo-col-attachment { flex: 0 0 var(--zotflow-evo-col-attachment, 34px); }
+.zotflow-evo-col-annotations { flex: 0 0 var(--zotflow-evo-col-annotations, 44px); }
+
+.zotflow-evo-tbody {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    outline: none;
+}
+
+.zotflow-evo-tbody-inner {
+    position: relative;
+}
+
+.zotflow-evo-tr {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    height: var(--zotflow-evo-row);
+    color: var(--text-normal);
+    cursor: default;
+    user-select: none;
+}
+
+.zotflow-evo-tr:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-evo-tr.is-selected {
+    background-color: var(--background-modifier-active-hover);
+}
+
+.zotflow-evo-tbody:focus-within .zotflow-evo-tr.is-selected {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.zotflow-evo-td.zotflow-evo-col-year,
+.zotflow-evo-td.zotflow-evo-col-annotations,
+.zotflow-evo-td.zotflow-evo-col-dateAdded,
+.zotflow-evo-td.zotflow-evo-col-dateModified {
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-td.is-narrow {
+    display: flex;
+    align-items: center;
+}
+
+.zotflow-evo-attachment {
+    display: inline-flex;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.zotflow-evo-attachment.is-search {
+    color: var(--text-faint);
+    opacity: 0.6;
+}
+
+.zotflow-evo-attachment:hover {
+    color: var(--interactive-accent);
+    opacity: 1;
+}
+
+.zotflow-evo-tr.is-selected .zotflow-evo-attachment {
+    color: inherit;
+}
+
+.zotflow-evo-table-empty {
+    padding: 24px 16px;
+    color: var(--text-faint);
+    text-align: center;
+}
+
+/* ----- The item on the right ----- */
+
+.zotflow-evo-pane.is-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.zotflow-evo-details {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.zotflow-evo-details.is-empty {
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+
+.zotflow-evo-details-head {
+    flex: 0 1 auto;
+    max-height: 55%;
+    overflow-y: auto;
+    padding: 14px 16px 12px;
+}
+
+.zotflow-evo-details-title {
+    font-size: 1.15em;
+    font-weight: var(--font-semibold);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.zotflow-evo-details-byline {
+    margin-top: 6px;
+    color: var(--text-normal);
+}
+
+.zotflow-evo-details-pub {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.zotflow-evo-details-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 10px;
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-details-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.zotflow-evo-details-file.is-primary {
+    color: var(--text-normal);
+}
+
+.zotflow-evo-details-file:hover {
+    color: var(--interactive-accent);
+}
+
+.zotflow-evo-details-file-name {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.zotflow-evo-details-abstract {
+    margin-top: 14px;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    user-select: text;
+}
+
+.zotflow-evo-details-annotations {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 8px 24px 4px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+/* ----- Annotation cards (as in the reader's note strip) ----- */
+
+.zotflow-evo-card {
+    margin-bottom: 12px;
+    padding-inline-end: 8px;
+    font-size: 13px;
+    line-height: var(--zotflow-evo-line);
+    cursor: pointer;
+}
+
+.zotflow-evo-card-row {
+    position: relative;
+    min-height: var(--zotflow-evo-line);
+    padding-inline-start: var(--zotflow-evo-gutter);
+    overflow-wrap: anywhere;
+}
+
+.zotflow-evo-card-row + .zotflow-evo-card-row {
+    margin-top: 2px;
+}
+
+.zotflow-evo-card-bars {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    inset-inline-start: 6px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+}
+
+.zotflow-evo-card-bar {
+    width: 3px;
+    border-radius: 2px;
+    background-color: var(--zotflow-evo-color);
+}
+
+.zotflow-evo-card-text {
+    white-space: pre-wrap;
+    user-select: text;
+}
+
+/* The page number in front of the first line; the lines after it start
+   underneath it. */
+.zotflow-evo-card-page {
+    float: inline-start;
+    margin-inline-end: 6px;
+    color: var(--text-faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+}
+
+.zotflow-evo-card:hover .zotflow-evo-card-text {
+    color: var(--text-normal);
+}
+
+.zotflow-evo-md {
+    white-space: normal;
+}
+
+.zotflow-evo-md > :first-child {
+    margin-top: 0;
+}
+
+.zotflow-evo-md > :last-child {
+    margin-bottom: 0;
+}
+
+.zotflow-evo-md p {
+    margin: 0 0 4px;
+}
+
+.zotflow-evo-card-ref {
+    padding-inline-start: var(--zotflow-evo-gutter);
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* ----- A collection in a tab of its own ----- */
+
+.zotflow-evo-colltab,
+.zotflow-evo-annos {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.zotflow-evo-colltab-title {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 14px 12px 6px;
+    overflow: hidden;
+    font-size: 1.2em;
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* ----- The annotation browser ----- */
+
+.zotflow-evo-annos-count {
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+}
+
+.zotflow-evo-select select {
+    height: 26px;
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-swatches {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-inline-start: auto;
+}
+
+.zotflow-evo-dot {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--zotflow-evo-color);
+    cursor: pointer;
+}
+
+.zotflow-evo-dot.is-static {
+    cursor: default;
+}
+
+.zotflow-evo-dot.is-current {
+    box-shadow:
+        0 0 0 2px var(--background-primary),
+        0 0 0 3px var(--zotflow-evo-color);
+}
+
+.zotflow-evo-dot.is-dimmed {
+    opacity: 0.3;
+}
+
+.zotflow-evo-annos-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 12px 32px 4px;
+}
+
+.zotflow-evo-annos-group {
+    margin-bottom: 8px;
+}
+
+.zotflow-evo-annos-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 10px 0 6px var(--zotflow-evo-gutter);
+    border-bottom: 1px solid var(--background-modifier-border);
+    background-color: var(--background-primary);
+    font-weight: var(--font-semibold);
+}
+
+.zotflow-evo-annos-heading-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.zotflow-evo-annos-heading-detail {
+    flex: none;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: normal;
+}
+
+.zotflow-evo-annos-heading-count {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}

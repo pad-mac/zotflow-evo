@@ -1,4 +1,12 @@
+import {
+    DEFAULT_ANNOTATION_LAYOUT,
+    DEFAULT_BOOK_SEARCH_URL,
+    DEFAULT_COLLECTION_COLUMNS,
+    DEFAULT_LIBRARY_COLUMNS,
+} from "utils/evo-library-model";
+
 import type { CustomReaderTheme } from "types/zotero-reader";
+import type { AnnotationLayout } from "utils/evo-library-model";
 import type { OutputFormat as CslOutputFormat } from "worker/csl";
 
 /** Per-library sync mode. */
@@ -92,7 +100,10 @@ export interface ZotFlowSettings {
     readerNoteStripHighlights: boolean;
     /** ZotFlow Evo: width of the note strip in pixels. */
     readerNoteStripWidth: number;
-    /** ZotFlow Evo: LiquidJS template for the line pinned above the note strip; "" for none. */
+    /**
+     * ZotFlow Evo: LiquidJS template for the line pinned above the note strip.
+     * Unused since 1.7.1-beta.6 (the head shows authors, year and title).
+     */
     readerNoteStripBanner: string;
     /**
      * ZotFlow Evo: text put before and after a comment dragged from the note
@@ -112,6 +123,22 @@ export interface ZotFlowSettings {
     autoSyncPull: boolean;
     /** ZotFlow Evo: sync shortly after something was changed here. */
     autoSyncPush: boolean;
+    /** ZotFlow Evo: columns of the library browser's table, in order. */
+    evoLibraryColumns: string[];
+    /** ZotFlow Evo: columns of a collection tab's table, in order. */
+    evoCollectionColumns: string[];
+    /** ZotFlow Evo: column widths in pixels, by column id (both tables). */
+    evoColumnWidths: Record<string, number>;
+    /** ZotFlow Evo: the tables' sort order. */
+    evoLibrarySort: { column: string; descending: boolean };
+    /** ZotFlow Evo: a collection lists the items of the collections inside it too. */
+    evoLibrarySubcollections: boolean;
+    /** ZotFlow Evo: widths of the library browser's side panes in pixels. */
+    evoLibraryPanes: { collections: number; details: number };
+    /** ZotFlow Evo: how the annotation browser groups and orders. */
+    evoAnnotationLayout: AnnotationLayout;
+    /** ZotFlow Evo: the search an item without a file opens; the query is appended. */
+    evoBookSearchUrl: string;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -233,6 +260,14 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoSourceLinksOpenAttachment: true,
     autoSyncPull: true,
     autoSyncPush: true,
+    evoLibraryColumns: [...DEFAULT_LIBRARY_COLUMNS],
+    evoCollectionColumns: [...DEFAULT_COLLECTION_COLUMNS],
+    evoColumnWidths: {},
+    evoLibrarySort: { column: "title", descending: false },
+    evoLibrarySubcollections: false,
+    evoLibraryPanes: { collections: 240, details: 360 },
+    evoAnnotationLayout: { ...DEFAULT_ANNOTATION_LAYOUT },
+    evoBookSearchUrl: DEFAULT_BOOK_SEARCH_URL,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

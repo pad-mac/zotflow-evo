@@ -32,6 +32,7 @@ import type { LibraryTemplateService } from "worker/services/library-template";
 import type { LocalTemplateService } from "worker/services/local-template";
 import type { NotePathService } from "worker/services/note-path";
 import type { CslRenderWorkerService } from "worker/services/csl-render";
+import type { EvoLibraryService } from "worker/services/evo-library";
 import type { BatchNoteInput } from "worker/tasks/impl/batch-note-task";
 import type { BatchExtractImagesInput } from "worker/tasks/impl/batch-extract-images-task";
 import type { IDBZoteroItem } from "types/db-schema";
@@ -74,6 +75,7 @@ export class WorkerBridge {
     private _localTemplate: Comlink.Remote<LocalTemplateService>;
     private _notePath: Comlink.Remote<NotePathService>;
     private _cslRender: Comlink.Remote<CslRenderWorkerService>;
+    private _evoLibrary: Comlink.Remote<EvoLibraryService>;
     private _tasks: Comlink.Remote<TaskManager>;
 
     private _parentHost: ParentHost;
@@ -216,6 +218,10 @@ export class WorkerBridge {
         this._cslRender = await materializeComlinkProxy(
             "cslRender",
             this._api.cslRender,
+        );
+        this._evoLibrary = await materializeComlinkProxy(
+            "evoLibrary",
+            this._api.evoLibrary,
         );
         this._tasks = await materializeComlinkProxy("tasks", this._api.tasks);
         finishStage("Connect worker service proxies");
@@ -367,6 +373,12 @@ export class WorkerBridge {
     get cslRender() {
         this.assertInitialized();
         return this._cslRender;
+    }
+
+    /** ZotFlow Evo: the library browser's data. */
+    get evoLibrary() {
+        this.assertInitialized();
+        return this._evoLibrary;
     }
 
     get tasks() {

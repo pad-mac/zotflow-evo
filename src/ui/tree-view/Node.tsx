@@ -24,6 +24,10 @@ import {
     type ZotFlowCitationPayload,
 } from "ui/editor/citation-helper";
 import { TagEditModal } from "ui/modals/tag-edit";
+import {
+    addCollectionMenuItems,
+    openCollectionFromTree,
+} from "ui/evo-library/tree-hooks";
 import { zoteroLibraryPrefix, zoteroSelectItemUri } from "utils/zotero-uri";
 import { splitHighlight } from "utils/search-query";
 import {
@@ -212,9 +216,14 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
         e.preventDefault();
         e.stopPropagation();
 
+        // ZotFlow Evo: Ctrl/Cmd+right-click opens a collection in a tab.
+        if (openCollectionFromTree(node, e)) return;
+
         node.select();
 
         const menu = new Menu();
+        // ZotFlow Evo: open a collection in a tab, show its annotations.
+        addCollectionMenuItems(menu, node);
 
         if (nodeType === "collection" || nodeType === "library") {
             menu.addItem((item) => {
@@ -715,6 +724,10 @@ export const NodeItem = ({ node, style }: NodeRendererProps<ViewNode>) => {
             onClick={handleOnClick}
             onDoubleClick={handleDoubleClick}
             onContextMenu={handleContextMenu}
+            // ZotFlow Evo: a middle click opens a collection in a tab.
+            onAuxClick={(e) => {
+                if (openCollectionFromTree(node, e)) e.preventDefault();
+            }}
             draggable={nodeType === "item" && node.data.itemType !== "note"}
             onDragStart={handleDragStart}
         >

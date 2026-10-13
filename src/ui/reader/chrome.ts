@@ -17,6 +17,7 @@ import type { ItemView, Plugin } from "obsidian";
 import type {
     ColorScheme,
     CreateReaderOptions,
+    NoteStripBanner,
     ReaderNoteStrip,
 } from "types/zotero-reader";
 import type { IframeReaderBridge } from "ui/reader/bridge";
@@ -120,32 +121,28 @@ function noteStripSettings(): ReaderNoteStrip {
     };
 }
 
-/** The line above the note strip for `subject`: the banner template, rendered. */
+/**
+ * The two lines above the note strip for `subject`: the item's authors (full
+ * names) and year, and its title. A local file shows its name as the title.
+ */
 async function renderNoteStripBanner(
     subject: NoteStripSubject | undefined,
-): Promise<string> {
-    const template = services.settings.readerNoteStripBanner.trim();
-    if (!template || !subject) return "";
-    if ("text" in subject) return subject.text;
+): Promise<NoteStripBanner> {
+    if (!subject) return "";
+    if ("text" in subject) return { title: subject.text };
     try {
-        const out = await workerBridge.displayTitle.renderTemplate(
+        const banner = await workerBridge.evoLibrary.itemBanner(
             subject.libraryID,
             subject.key,
-            template,
         );
-        // One line; an item without authors leaves no stray separator in front.
-        const line = out
-            .replace(/\s+/g, " ")
-            .trim()
-            .replace(/^[·,\-–|\s]+/, "");
-        return line || subject.fallback;
+        return banner ?? { title: subject.fallback };
     } catch (e) {
         services.logService.warn(
-            "Note strip banner template failed to render; showing the title",
+            "Could not read the item for the note strip's head; showing the title",
             "ReaderChrome",
             e,
         );
-        return subject.fallback;
+        return { title: subject.fallback };
     }
 }
 
@@ -188,9 +185,22 @@ export function connectNoteStrip(
     if (!listening.has(bridge)) {
         listening.add(bridge);
         bridge.onEventType("noteStripChanged", (event) => {
-            const { highlights } = event.settings;
+            const { highlights, width } = event.settings;
             if (typeof highlights === "boolean") {
                 setChromeSetting("readerNoteStripHighlights", highlights);
+            }
+            // Dragged wider or narrower in the reader: every reader follows.
+            if (
+                typeof width === "number" &&
+                Number.isFinite(width) &&
+                width !== services.settings.readerNoteStripWidth
+            ) {
+                services.settings.readerNoteStripWidth = Math.round(width);
+                chromeChanged.emit();
+                ff(
+                    services.saveSettings(),
+                    "Failed to save the note strip width",
+                );
             }
         });
     }
