@@ -33,11 +33,9 @@ import { startSync } from "ui/start-sync";
 import { registerReaderChromeCommands } from "ui/reader/chrome";
 import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
 import { registerEvoLibrary } from "ui/evo-library/views";
+import { registerAttachFromWebViewer } from "ui/evo-library/attach-file";
 import { registerSourceNoteLinks } from "ui/evo-source-links";
-import {
-    refreshEvoAutoSync,
-    startEvoAutoSync,
-} from "services/evo-auto-sync";
+import { refreshEvoAutoSync, startEvoAutoSync } from "services/evo-auto-sync";
 import { promptNoteGone } from "ui/modals/note-gone-modal";
 
 import { openAttachment, openItemNote } from "utils/viewer";
@@ -306,6 +304,7 @@ export default class ZotFlow extends Plugin {
         registerReaderChromeCommands(this);
         registerEvoWorkspaceCommands(this);
         registerEvoLibrary(this);
+        registerAttachFromWebViewer(this);
         // ZotFlow Evo: a click on a link to a source note opens the PDF.
         registerSourceNoteLinks(this);
 

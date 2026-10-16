@@ -66,6 +66,19 @@ export interface ReaderNoteStrip {
     banner?: NoteStripBanner;
     /** List the highlights themselves too, not only comments. */
     highlights?: boolean;
+    /**
+     * The Obsidian view's header buttons, shown in the strip's head while
+     * the header is hidden (a click comes back as `noteStripAction`).
+     */
+    actions?: NoteStripAction[];
+}
+
+/** ZotFlow Evo: a header button of the reader view, mirrored in the note strip. */
+export interface NoteStripAction {
+    id: string;
+    title: string;
+    /** The icon as Obsidian drew it (SVG markup). */
+    icon: string;
 }
 
 /** ZotFlow Evo: what else the reader says about a drag it starts. */
@@ -83,6 +96,8 @@ export type ChildEvents =
     | { type: "viewStateChanged"; state: unknown; primary: boolean }
     /** ZotFlow Evo: a note strip setting was changed in the strip itself. */
     | { type: "noteStripChanged"; settings: ReaderNoteStrip }
+    /** ZotFlow Evo: a mirrored header button was clicked in the note strip, at x/y of the reader's document. */
+    | { type: "noteStripAction"; id: string; x: number; y: number }
     | {
           type: "openTagsPopup";
           annotationID: unknown;

@@ -7,7 +7,10 @@
 import { notifyReaderChromeChanged } from "ui/reader/chrome";
 import { ANNOTATION_COLORS } from "ui/editor/evo-drop";
 import { DEFAULT_DROP_LINK_TEMPLATE } from "settings/types";
-import { DEFAULT_BOOK_SEARCH_URL } from "utils/evo-library-model";
+import {
+    DEFAULT_ATTACH_FILENAME,
+    DEFAULT_BOOK_SEARCH_URL,
+} from "utils/evo-library-model";
 
 import type ZotFlow from "main";
 import type {
@@ -146,6 +149,43 @@ export class EvoSection {
                                         this.plugin.settings.evoBookSearchUrl =
                                             value.trim() ||
                                             DEFAULT_BOOK_SEARCH_URL;
+                                        await this.plugin.saveSettings();
+                                    });
+                                text.inputEl.addClass("zotflow-evo-wide-input");
+                            });
+                        },
+                    },
+                    {
+                        name: "Anna's Archive key",
+                        desc: "Your member key (Account page). With it, the paperclip button of a web viewer pane gets the file of the book open there through the member API; without it, ZotFlow takes the file from the page (open the fast download or Anna's viewer first). Kept in Obsidian's secret storage, not in the plugin's settings file.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.inputEl.type = "password";
+                                text.setPlaceholder("Secret key")
+                                    .setValue(
+                                        this.plugin.settings.evoAnnasKey ?? "",
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoAnnasKey =
+                                            value.trim();
+                                        await this.plugin.saveSettings();
+                                    });
+                            });
+                        },
+                    },
+                    {
+                        name: "Name of a saved file",
+                        desc: `What a file saved to an item from the web viewer is called (Zotero's storage; the extension is added). LiquidJS with lastName, year, shortTitle (the title when there is none), title, itemType. Default: ${DEFAULT_ATTACH_FILENAME}`,
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder(DEFAULT_ATTACH_FILENAME)
+                                    .setValue(
+                                        this.plugin.settings.evoAttachFilename,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoAttachFilename =
+                                            value.trim() ||
+                                            DEFAULT_ATTACH_FILENAME;
                                         await this.plugin.saveSettings();
                                     });
                                 text.inputEl.addClass("zotflow-evo-wide-input");

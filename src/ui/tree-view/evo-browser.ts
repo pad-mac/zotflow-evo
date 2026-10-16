@@ -11,7 +11,7 @@ import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { ZOTFLOW_SOURCE_LINKS_MIME } from "ui/editor/evo-link-drop";
 import { AttachmentSelectModal } from "ui/modals/attachment-suggest";
-import { openAttachment } from "utils/viewer";
+import { notifyLinkedFile, openAttachment } from "utils/viewer";
 import {
     attachmentKind,
     choosePrimaryAttachment,
@@ -136,10 +136,20 @@ export async function openItemPrimaryAttachment(
 
     const item = await workerBridge.dbHelper.getItem(libraryID, key);
     if (!choices.length) {
+        // ZotFlow Evo: only a linked file (or the item is one): say why.
+        if (
+            attachments.some((a) => kindOf(a) === "linked") ||
+            (item?.itemType === "attachment" &&
+                kindOf(item) === "linked")
+        ) {
+            if (!quiet) notifyLinkedFile();
+            return false;
+        }
         // The item may itself be the file (a PDF without a parent item).
         if (
             item?.itemType === "attachment" &&
             kindOf(item) !== "link" &&
+            kindOf(item) !== "linked" &&
             kindOf(item) !== "other"
         ) {
             await openAttachment(libraryID, key, app);

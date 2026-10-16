@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { EvoLibraryService } from "worker/services/evo-library";
-import { seedCollection, seedItem } from "../fakes/db";
+import { db, seedCollection, seedItem } from "../fakes/db";
 import { createServiceHarness, USER_ID } from "../fakes/services";
 
 import type { AnyIDBZoteroItem } from "types/db-schema";
@@ -205,5 +205,66 @@ describe("EvoLibraryService", () => {
         ]);
         const deep = await service.collectionAnnotations({ libraryID: USER_ID, collectionKey: "TOP00001", subcollections: true });
         expect(deep.annotations.map((a) => a.id).sort()).toEqual(["ANN00001", "ANN00002"]);
+    });
+});
+
+describe("EvoLibraryService edits", () => {
+    test("add to and remove from a collection: top-level items only, each once", async () => {
+        await book("BOOK0001", { collections: ["TOP00001"] }, { collections: ["TOP00001"] });
+        await book("BOOK0002");
+        await attachment("PDF00001", "BOOK0001", "application/pdf");
+
+        const added = await service.addToCollection(USER_ID, ["BOOK0001", "BOOK0002", "PDF00001", "MISSING1"], "ALPHA001");
+        expect(added).toEqual({ changed: 2, skipped: 2 });
+        const b1 = (await db.items.get([USER_ID, "BOOK0001"]))!;
+        expect(b1.collections.sort()).toEqual(["ALPHA001", "TOP00001"]);
+        expect(b1.synced).toBe(0);
+        expect((b1.raw.data as { collections: string[] }).collections.sort()).toEqual(["ALPHA001", "TOP00001"]);
+        expect(await service.addToCollection(USER_ID, ["BOOK0001"], "ALPHA001")).toEqual({ changed: 0, skipped: 1 });
+
+        const listed = await service.listItems({ libraryID: USER_ID, collectionKey: "ALPHA001", subcollections: false });
+        expect(listed.map((r) => r.key).sort()).toEqual(["BOOK0001", "BOOK0002"]);
+
+        expect(await service.removeFromCollection(USER_ID, ["BOOK0001", "BOOK0002"], "TOP00001")).toEqual({ changed: 1, skipped: 1 });
+        expect((await db.items.get([USER_ID, "BOOK0001"]))!.collections).toEqual(["ALPHA001"]);
+    });
+
+    test("trash: the item is marked deleted and leaves the lists", async () => {
+        await book("BOOK0001", { collections: ["TOP00001"] }, { collections: ["TOP00001"] });
+        expect(await service.trashItems(USER_ID, ["BOOK0001"])).toEqual({ changed: 1, skipped: 0 });
+        const row = (await db.items.get([USER_ID, "BOOK0001"]))!;
+        expect(row.trashed).toBe(1);
+        expect((row.raw.data as { deleted?: unknown }).deleted).toBe(1);
+        expect(await service.listItems({ libraryID: USER_ID, collectionKey: "TOP00001", subcollections: false })).toEqual([]);
+    });
+
+    test("a read-only library refuses edits", async () => {
+        const h2 = await createServiceHarness({ libraries: [{ id: USER_ID, mode: "readonly" }] });
+        const ro = new EvoLibraryService(h2.settings, h2.library);
+        await book("BOOK0001");
+        await expect(ro.addToCollection(USER_ID, ["BOOK0001"], "TOP00001")).rejects.toThrow(/read-only/);
+    });
+
+    test("filename parts: first main creator's last name, year, short title (else the title)", async () => {
+        await book("BOOK0001", {}, { shortTitle: "Lebendige Kräfte" });
+        expect(await service.filenameParts(USER_ID, "BOOK0001")).toEqual({
+            lastName: "Schmidgen",
+            year: "2005",
+            shortTitle: "Lebendige Kräfte",
+            title: "Book BOOK0001",
+            itemType: "book",
+        });
+        await book("BOOK0002");
+        expect((await service.filenameParts(USER_ID, "BOOK0002"))!.shortTitle).toBe("Book BOOK0002");
+    });
+
+    test("the name of a saved file: the template over those parts, made safe", async () => {
+        await book("BOOK0001", {}, { shortTitle: "Lebendige Kräfte: <i>Helmholtz</i>" });
+        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("schmidgen_2005_lebendige_kräfte_helmholtz");
+        service.updateSettings({ ...h.settings, evoAttachFilename: "{{ year }} {{ lastName }}" });
+        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("2005 Schmidgen");
+        service.updateSettings({ ...h.settings, evoAttachFilename: "{% if %}" });
+        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("schmidgen_2005_lebendige_kräfte_helmholtz");
+        expect(await service.attachFilename(USER_ID, "MISSING1")).toBe("");
     });
 });

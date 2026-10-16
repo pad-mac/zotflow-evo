@@ -6,11 +6,14 @@
 import { Platform } from "obsidian";
 
 import { workerBridge } from "bridge";
+import { noteLocalEdit } from "services/evo-auto-sync";
 import { services } from "services/services";
 import { ZOTFLOW_CITATION_MIME } from "ui/editor/citation-helper";
 import { ZOTFLOW_SOURCE_LINKS_MIME } from "ui/editor/evo-link-drop";
 import { openItemPrimaryAttachment } from "ui/tree-view/evo-browser";
-import { bookSearchUrl } from "utils/evo-library-model";
+import { noteSearchTarget } from "ui/evo-library/attach-file";
+import { selectionLabel } from "ui/evo-library/selection";
+import { bookSearchUrl, plainTitle } from "utils/evo-library-model";
 import { openAttachment } from "utils/viewer";
 import { zoteroLibraryPrefix, zoteroSelectItemUri } from "utils/zotero-uri";
 
@@ -23,6 +26,7 @@ import type { EvoScope } from "worker/services/evo-library";
 export const LIBRARY_VIEW_TYPE = "zotflow-evo-library";
 export const COLLECTION_VIEW_TYPE = "zotflow-evo-collection";
 export const ANNOTATIONS_VIEW_TYPE = "zotflow-evo-annotations";
+export const DETAILS_VIEW_TYPE = "zotflow-evo-details";
 
 function inSidebar(app: App, leaf: WorkspaceLeaf): boolean {
     const root = leaf.getRoot();
@@ -32,7 +36,7 @@ function inSidebar(app: App, leaf: WorkspaceLeaf): boolean {
 }
 
 /** Open the library browser in a tab, or show the one already open. */
-export async function openLibraryBrowser(app: App): Promise<void> {
+export async function openLibraryBrowser(app: App): Promise<WorkspaceLeaf> {
     const { workspace } = app;
     const existing = workspace
         .getLeavesOfType(LIBRARY_VIEW_TYPE)
@@ -40,11 +44,12 @@ export async function openLibraryBrowser(app: App): Promise<void> {
     if (existing) {
         await workspace.revealLeaf(existing);
         workspace.setActiveLeaf(existing, { focus: true });
-        return;
+        return existing;
     }
     const leaf = workspace.getLeaf("tab");
     await leaf.setViewState({ type: LIBRARY_VIEW_TYPE, active: true });
     await workspace.revealLeaf(leaf);
+    return leaf;
 }
 
 /** Open one collection in a tab of its own: its name and its items. */
@@ -73,6 +78,22 @@ export async function openAnnotationsTab(
         state: { ...scope },
     });
     await app.workspace.revealLeaf(leaf);
+}
+
+/**
+ * Open the item details in a pane of their own, beside the active one; they
+ * follow the item selected last in a library browser or collection tab.
+ */
+export async function openDetailsTab(app: App): Promise<void> {
+    const { workspace } = app;
+    const existing = workspace.getLeavesOfType(DETAILS_VIEW_TYPE)[0];
+    if (existing) {
+        await workspace.revealLeaf(existing);
+        return;
+    }
+    const leaf = workspace.getLeaf("split", "vertical");
+    await leaf.setViewState({ type: DETAILS_VIEW_TYPE, active: true });
+    await workspace.revealLeaf(leaf);
 }
 
 /** Open what an item stands for: its PDF, else EPUB, else snapshot (see evo-browser.ts). */
@@ -161,8 +182,21 @@ function webViewerEnabled(app: App): boolean {
 export async function openBookSearch(
     app: App,
     from: WorkspaceLeaf,
-    item: { title: string; firstCreator: string; year: string },
+    item: {
+        title: string;
+        firstCreator: string;
+        year: string;
+        libraryID?: number;
+        key?: string;
+    },
 ): Promise<void> {
+    // "Save to the selected item" falls back to the item searched for.
+    if (item.libraryID !== undefined && item.key)
+        noteSearchTarget({
+            libraryID: item.libraryID,
+            key: item.key,
+            label: selectionLabel(item),
+        });
     const url = bookSearchUrl(services.settings.evoBookSearchUrl, item);
     if (!Platform.isDesktopApp || !webViewerEnabled(app)) {
         services.notificationService.notify(
@@ -185,7 +219,55 @@ export async function openBookSearch(
         active: true,
         state: { url, navigate: true },
     });
+    if (!alive) setPaneWidth(leaf, SEARCH_PANE_WIDTH);
     await app.workspace.revealLeaf(leaf);
+}
+
+/** How wide the web viewer opens beside the browser, in pixels. */
+const SEARCH_PANE_WIDTH = 640;
+
+/** Obsidian's layout items as far as sizing goes (not in the public typings). */
+interface SizedItem {
+    parent?: SizedItem;
+    children?: SizedItem[];
+    containerEl?: HTMLElement;
+    dimension?: number | null;
+    setDimension?: (dimension: number | null) => void;
+}
+
+/**
+ * Make a pane `px` wide: its tab group gets that share of the split it is
+ * in, the others the rest in their proportions. Obsidian keeps the shares
+ * (`dimension`) as weights; without `setDimension` (another Obsidian) the
+ * weights go on the elements directly.
+ */
+export function setPaneWidth(leaf: WorkspaceLeaf, px: number): void {
+    try {
+        const tabs = (leaf as unknown as SizedItem).parent;
+        const split = tabs?.parent;
+        const total = split?.containerEl?.getBoundingClientRect().width ?? 0;
+        if (!tabs || !split?.children || total < px + 200) return;
+        const share = (px / total) * 100;
+        const others = split.children.filter((c) => c !== tabs);
+        const weights = others.map((c) => c.dimension || 1);
+        const sum = weights.reduce((a, b) => a + b, 0) || 1;
+        const assign = (item: SizedItem, value: number) => {
+            if (typeof item.setDimension === "function")
+                item.setDimension(value);
+            else if (item.containerEl)
+                item.containerEl.style.flexGrow = String(value);
+        };
+        others.forEach((c, i) =>
+            assign(c, ((weights[i] ?? 1) / sum) * (100 - share)),
+        );
+        assign(tabs, share);
+    } catch (e) {
+        services.logService.warn(
+            "Could not size the web viewer pane",
+            "EvoLibrary",
+            e,
+        );
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,9 +279,20 @@ function hasSourceNote(itemType: string): boolean {
     return itemType !== "attachment" && itemType !== "note";
 }
 
+/** A drag of items between tables and onto collections: `{ libraryID, keys }`. */
+export const EVO_ITEMS_MIME = "application/x-zotflow-evo-items";
+/** Marks the library a drag of items comes from (readable while dragging). */
+const EVO_LIBRARY_MIME = "application/x-zotflow-evo-library-";
+
+export interface DraggedItems {
+    libraryID: number;
+    keys: string[];
+}
+
 /**
- * A drag of items out of a table: dropped into a note as links to their
- * source notes (ui/editor/evo-link-drop.ts). Returns how many it carries.
+ * A drag of items out of a table: dropped on a collection, they are added
+ * to it (CollectionPane); dropped into a note, links to their source notes
+ * (ui/editor/evo-link-drop.ts). Returns how many it carries.
  */
 export function setItemsDrag(
     dataTransfer: DataTransfer,
@@ -210,16 +303,143 @@ export function setItemsDrag(
         title: string;
     }[],
 ): number {
-    const linked = items.filter((i) => hasSourceNote(i.itemType));
-    if (!linked.length) return 0;
-    const payload: SourceLinksPayload = {
-        type: "zotflow-source-links",
-        items: linked.map((i) => ({ libraryID: i.libraryID, key: i.key })),
-    };
+    if (!items.length) return 0;
+    const libraryID = items[0]!.libraryID;
+    const own = items.filter((i) => i.libraryID === libraryID);
+    const carried: DraggedItems = { libraryID, keys: own.map((i) => i.key) };
     dataTransfer.effectAllowed = "copy";
-    dataTransfer.setData(ZOTFLOW_SOURCE_LINKS_MIME, JSON.stringify(payload));
-    dataTransfer.setData("text/plain", linked.map((i) => i.title).join("\n"));
-    return linked.length;
+    dataTransfer.setData(EVO_ITEMS_MIME, JSON.stringify(carried));
+    dataTransfer.setData(EVO_LIBRARY_MIME + libraryID, "");
+    const linked = items.filter((i) => hasSourceNote(i.itemType));
+    if (linked.length) {
+        const payload: SourceLinksPayload = {
+            type: "zotflow-source-links",
+            items: linked.map((i) => ({ libraryID: i.libraryID, key: i.key })),
+        };
+        dataTransfer.setData(
+            ZOTFLOW_SOURCE_LINKS_MIME,
+            JSON.stringify(payload),
+        );
+    }
+    dataTransfer.setData(
+        "text/plain",
+        items.map((i) => plainTitle(i.title)).join("\n"),
+    );
+    return items.length;
+}
+
+/** The library the items being dragged come from, or null when it is no drag of items. */
+export function draggedItemsLibrary(dataTransfer: DataTransfer): number | null {
+    if (!Array.from(dataTransfer.types).includes(EVO_ITEMS_MIME)) return null;
+    for (const type of Array.from(dataTransfer.types)) {
+        if (type.startsWith(EVO_LIBRARY_MIME)) {
+            const id = Number(type.slice(EVO_LIBRARY_MIME.length));
+            if (Number.isFinite(id)) return id;
+        }
+    }
+    return null;
+}
+
+/** The items a drop carries, if it is a drag of items. */
+export function readDraggedItems(
+    dataTransfer: DataTransfer,
+): DraggedItems | null {
+    try {
+        const raw = dataTransfer.getData(EVO_ITEMS_MIME);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Partial<DraggedItems>;
+        if (typeof parsed.libraryID !== "number" || !Array.isArray(parsed.keys))
+            return null;
+        return {
+            libraryID: parsed.libraryID,
+            keys: parsed.keys.filter((k): k is string => typeof k === "string"),
+        };
+    } catch {
+        return null;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Edits                                                             */
+/* ------------------------------------------------------------------ */
+
+function editFailed(what: string, e: unknown) {
+    services.logService.error(`Failed to ${what}`, "EvoLibrary", e);
+    const message =
+        e instanceof Error && e.message
+            ? e.message
+            : "See the log for details.";
+    services.notificationService.notify(
+        "error",
+        `Couldn't ${what}. ${message}`,
+    );
+}
+
+const items = (n: number) => (n === 1 ? "1 item" : `${n} items`);
+
+/** Add items to a collection (dropped on it). */
+export async function addItemsToCollection(
+    libraryID: number,
+    keys: string[],
+    collectionKey: string,
+    collectionName: string,
+): Promise<void> {
+    try {
+        const result = await workerBridge.evoLibrary.addToCollection(
+            libraryID,
+            keys,
+            collectionKey,
+        );
+        if (result.changed) noteLocalEdit(libraryID);
+        services.notificationService.notify(
+            "info",
+            result.changed
+                ? `Added ${items(result.changed)} to “${collectionName}”.`
+                : `Already in “${collectionName}”.`,
+        );
+    } catch (e) {
+        editFailed("add to the collection", e);
+    }
+}
+
+/** Take items out of a collection (Delete, or the item menu). */
+export async function removeItemsFromCollection(
+    libraryID: number,
+    keys: string[],
+    collectionKey: string,
+): Promise<void> {
+    try {
+        const result = await workerBridge.evoLibrary.removeFromCollection(
+            libraryID,
+            keys,
+            collectionKey,
+        );
+        if (result.changed) noteLocalEdit(libraryID);
+        if (result.skipped) {
+            services.notificationService.notify(
+                "info",
+                `${items(result.skipped)} only in sub-collections, left there.`,
+            );
+        }
+    } catch (e) {
+        editFailed("remove from the collection", e);
+    }
+}
+
+/** Move items to the trash (Shift+Delete, or the item menu). */
+export async function trashItems(
+    libraryID: number,
+    keys: string[],
+): Promise<void> {
+    try {
+        const result = await workerBridge.evoLibrary.trashItems(
+            libraryID,
+            keys,
+        );
+        if (result.changed) noteLocalEdit(libraryID);
+    } catch (e) {
+        editFailed("move to the trash", e);
+    }
 }
 
 /** The fields of an annotation a drop needs. */

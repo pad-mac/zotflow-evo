@@ -11,15 +11,25 @@ import { createRoot } from "react-dom/client";
 import {
     ANNOTATIONS_VIEW_TYPE,
     COLLECTION_VIEW_TYPE,
+    DETAILS_VIEW_TYPE,
     LIBRARY_VIEW_TYPE,
 } from "ui/evo-library/actions";
 import { AnnotationBrowser } from "ui/evo-library/AnnotationBrowser";
 import { CollectionTab } from "ui/evo-library/CollectionTab";
+import { DetailsTab } from "ui/evo-library/ItemDetails";
 import { LibraryBrowser } from "ui/evo-library/LibraryBrowser";
+import {
+    ANNOTATIONS_ICON,
+    ANNOTATIONS_ICON_FALLBACK,
+    iconOr,
+} from "ui/evo-library/parts";
 
 import type { Plugin, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type { Root } from "react-dom/client";
-import type { BrowserTarget } from "ui/evo-library/LibraryBrowser";
+import type {
+    BrowserControl,
+    BrowserTarget,
+} from "ui/evo-library/LibraryBrowser";
 import type { EvoScope } from "worker/services/evo-library";
 
 /** The tab's title changed: Obsidian redraws the header (not in the public typings). */
@@ -38,10 +48,32 @@ function readScope(state: unknown): EvoScope | null {
     };
 }
 
+/**
+ * The views have their own title and tools, so Obsidian's header above them
+ * (title, back and forward, the more-options menu) is hidden — on desktop;
+ * on a phone it holds the way back. See `zotflow-evo-headerless` in styles.css.
+ */
+const HEADERLESS = "zotflow-evo-headerless";
+
+/** A view whose table has a filter field (the "filter" command). */
+export interface FilterableView {
+    focusFilter(): void;
+}
+
 /** The library browser: collections, table, details. */
-export class EvoLibraryView extends ItemView {
+export class EvoLibraryView extends ItemView implements FilterableView {
     private root: Root | null = null;
     private evoTarget: BrowserTarget | null = null;
+    private control: { current: BrowserControl | null } = { current: null };
+
+    focusFilter() {
+        this.control.current?.focusFilter();
+    }
+
+    /** Show a library or collection (null: My Library). */
+    goTo(target: BrowserTarget | null) {
+        this.control.current?.goTo(target);
+    }
 
     getViewType() {
         return LIBRARY_VIEW_TYPE;
@@ -87,11 +119,13 @@ export class EvoLibraryView extends ItemView {
                 leaf={this.leaf}
                 initial={this.evoTarget}
                 onTarget={this.onTarget}
+                control={this.control}
             />,
         );
     }
 
     async onOpen() {
+        this.containerEl.addClass(HEADERLESS);
         this.contentEl.addClass("zotflow-evo-view");
         this.root = createRoot(this.contentEl);
         this.render();
@@ -135,6 +169,7 @@ abstract class ScopeView extends ItemView {
     protected abstract render(): void;
 
     async onOpen() {
+        this.containerEl.addClass(HEADERLESS);
         this.contentEl.addClass("zotflow-evo-view");
         this.root = createRoot(this.contentEl);
         this.render();
@@ -147,7 +182,15 @@ abstract class ScopeView extends ItemView {
 }
 
 /** One collection in a tab of its own. */
-export class EvoCollectionView extends ScopeView {
+export class EvoCollectionView extends ScopeView implements FilterableView {
+    private control: { current: { focusFilter(): void } | null } = {
+        current: null,
+    };
+
+    focusFilter() {
+        this.control.current?.focusFilter();
+    }
+
     getViewType() {
         return COLLECTION_VIEW_TYPE;
     }
@@ -170,6 +213,7 @@ export class EvoCollectionView extends ScopeView {
                 scope={this.evoScope}
                 onName={this.onName}
                 onSubcollections={this.onSubcollections}
+                control={this.control}
             />,
         );
     }
@@ -188,7 +232,7 @@ export class EvoAnnotationsView extends ScopeView {
     }
 
     getIcon() {
-        return "highlighter";
+        return iconOr(ANNOTATIONS_ICON, ANNOTATIONS_ICON_FALLBACK);
     }
 
     protected render() {
@@ -202,6 +246,35 @@ export class EvoAnnotationsView extends ScopeView {
                 onSubcollections={this.onSubcollections}
             />,
         );
+    }
+}
+
+/** The selected item in a pane of its own (it follows the last library tab used). */
+export class EvoDetailsView extends ItemView {
+    private root: Root | null = null;
+
+    getViewType() {
+        return DETAILS_VIEW_TYPE;
+    }
+
+    getDisplayText() {
+        return "Zotero item";
+    }
+
+    getIcon() {
+        return "panel-right";
+    }
+
+    async onOpen() {
+        this.containerEl.addClass(HEADERLESS);
+        this.contentEl.addClass("zotflow-evo-view");
+        this.root = createRoot(this.contentEl);
+        this.root.render(<DetailsTab app={this.app} leaf={this.leaf} />);
+    }
+
+    async onClose() {
+        this.root?.unmount();
+        this.root = null;
     }
 }
 
@@ -219,4 +292,5 @@ export function registerEvoLibrary(plugin: Plugin) {
         ANNOTATIONS_VIEW_TYPE,
         (leaf) => new EvoAnnotationsView(leaf),
     );
+    plugin.registerView(DETAILS_VIEW_TYPE, (leaf) => new EvoDetailsView(leaf));
 }

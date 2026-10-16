@@ -9,6 +9,17 @@ import { newReaderLeaf } from "utils/evo-reader-leaf";
 import type { ReaderNavigation } from "types/zotero-reader";
 
 /**
+ * ZotFlow Evo: a heads-up instead of a failed download — linked files live
+ * outside Zotero's storage, where ZotFlow cannot reach them (yet).
+ */
+export function notifyLinkedFile(): void {
+    services.notificationService.notify(
+        "warning",
+        "This is a linked file, stored outside Zotero. ZotFlow can't open linked files yet; open it in Zotero.",
+    );
+}
+
+/**
  * Open an attachment in the default application.
  * @param libraryID The library ID of the attachment.
  * @param key The item key of the attachment.
@@ -43,6 +54,16 @@ export async function openAttachment(
     if (activeLeaf) {
         await focusReaderLeaf(app.workspace, activeLeaf);
     } else {
+        // ZotFlow Evo: a linked file cannot be fetched; say so, don't try.
+        const item = await workerBridge.dbHelper
+            .getItem(libraryID, key)
+            .catch(() => null);
+        const linkMode = (item?.raw?.data as { linkMode?: string } | undefined)
+            ?.linkMode;
+        if (linkMode === "linked_file") {
+            notifyLinkedFile();
+            return;
+        }
         // ZotFlow Evo: a new tab, in a pane wide enough for a reader.
         activeLeaf = newReaderLeaf(app);
 

@@ -1,19 +1,37 @@
 /**
- * ZotFlow Evo (fork): the library browser's right pane — the item's title,
- * its first two authors and year, where it was published, its abstract,
- * and below a line the annotations of the file it opens. See FORK.md.
+ * ZotFlow Evo (fork): the selected item — in the library browser's right
+ * pane, or in a tab of its own (DetailsTab). On top, always in view: the
+ * title, the first two authors, the year on its own line, where it was
+ * published, its files. Under it the abstract, which scrolls on its own
+ * when long, and below a line the annotations of the file it opens, which
+ * scroll on their own too. See FORK.md.
  */
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { AnnotationCard, Icon } from "ui/evo-library/parts";
+import { workerBridge } from "bridge";
+import { services } from "services/services";
+import { openAnnotation, openBookSearch } from "ui/evo-library/actions";
+import { onSelection, lastSelection } from "ui/evo-library/selection";
+import {
+    AnnotationCard,
+    Icon,
+    Title,
+    useLibraryChanges,
+} from "ui/evo-library/parts";
+import { notifyLinkedFile, openAttachment } from "utils/viewer";
 
+import type { App, WorkspaceLeaf } from "obsidian";
 import type { CardAnnotation } from "ui/evo-library/parts";
-import type { EvoItemDetails } from "worker/services/evo-library";
+import type {
+    EvoAttachmentInfo,
+    EvoItemDetails,
+} from "worker/services/evo-library";
 
 const KIND_LABEL: Record<string, string> = {
     pdf: "PDF",
     epub: "EPUB",
     snapshot: "Web snapshot",
+    linked: "Linked file",
     link: "Link",
     other: "File",
 };
@@ -22,39 +40,39 @@ const KIND_ICON: Record<string, string> = {
     pdf: "file-text",
     epub: "book-open",
     snapshot: "globe",
+    linked: "file-symlink",
     link: "link",
     other: "file",
 };
 
 export interface ItemDetailsProps {
+    app: App;
+    leaf: WorkspaceLeaf;
     details: EvoItemDetails | null;
     /** How many items are selected (the pane shows the focused one). */
     count: number;
-    onOpenAttachment: (attachmentKey: string) => void;
-    onOpenAnnotation: (annotation: CardAnnotation) => void;
-    onSearch: () => void;
+    /** What to say with nothing to show. */
+    emptyText?: string;
 }
 
 export function ItemDetails({
+    app,
+    leaf,
     details,
     count,
-    onOpenAttachment,
-    onOpenAnnotation,
-    onSearch,
+    emptyText,
 }: ItemDetailsProps) {
     if (!details) {
         return (
             <div className="zotflow-evo-details is-empty">
-                {count > 1 ? `${count} items selected` : "No item selected"}
+                {count > 1
+                    ? `${count} items selected`
+                    : (emptyText ?? "No item selected")}
             </div>
         );
     }
-    const byline = [
-        details.authors.join(", ") + (details.moreAuthors ? " et al." : ""),
-        details.year ? `(${details.year})` : "",
-    ]
-        .filter((s) => s.trim())
-        .join(" ");
+    const authors =
+        details.authors.join(", ") + (details.moreAuthors ? " et al." : "");
     const openable = details.attachments.filter(
         (a) => a.kind === "pdf" || a.kind === "epub" || a.kind === "snapshot",
     );
@@ -71,12 +89,26 @@ export function ItemDetails({
         color: a.color,
         pageLabel: a.pageLabel,
     }));
+    const open = (a: EvoAttachmentInfo) => {
+        if (a.kind === "linked") {
+            notifyLinkedFile();
+            return;
+        }
+        void openAttachment(details.libraryID, a.key, app);
+    };
     return (
         <div className="zotflow-evo-details">
             <div className="zotflow-evo-details-head">
-                <div className="zotflow-evo-details-title">{details.title}</div>
-                {byline && (
-                    <div className="zotflow-evo-details-byline">{byline}</div>
+                <div className="zotflow-evo-details-title">
+                    <Title text={details.title} />
+                </div>
+                {authors.trim() && (
+                    <div className="zotflow-evo-details-authors">{authors}</div>
+                )}
+                {details.year && (
+                    <div className="zotflow-evo-details-year">
+                        {details.year}
+                    </div>
                 )}
                 {details.publication && (
                     <div className="zotflow-evo-details-pub">
@@ -92,12 +124,16 @@ export function ItemDetails({
                                     "zotflow-evo-details-file" +
                                     (a.key === details.primaryKey
                                         ? " is-primary"
-                                        : "")
+                                        : "") +
+                                    (a.kind === "linked" ? " is-linked" : "")
                                 }
                                 title={`${KIND_LABEL[a.kind]}: ${a.title}`}
-                                onClick={() => onOpenAttachment(a.key)}
+                                onClick={() => open(a)}
                             >
-                                <Icon name={KIND_ICON[a.kind] ?? "file"} />
+                                <Icon
+                                    name={KIND_ICON[a.kind] ?? "file"}
+                                    fallback="file"
+                                />
                                 <span className="zotflow-evo-details-file-name">
                                     {a.title}
                                 </span>
@@ -107,7 +143,9 @@ export function ItemDetails({
                             <span
                                 className="zotflow-evo-details-file is-search"
                                 title="Search for the file"
-                                onClick={onSearch}
+                                onClick={() =>
+                                    void openBookSearch(app, leaf, details)
+                                }
                             >
                                 <Icon name="search" />
                                 <span className="zotflow-evo-details-file-name">
@@ -117,23 +155,85 @@ export function ItemDetails({
                         )}
                     </div>
                 )}
-                {details.abstract && (
-                    <div className="zotflow-evo-details-abstract">
-                        {details.abstract}
-                    </div>
-                )}
             </div>
+            {details.abstract && (
+                <div className="zotflow-evo-details-abstract">
+                    {details.abstract}
+                </div>
+            )}
             {cards.length > 0 && (
                 <div className="zotflow-evo-details-annotations">
                     {cards.map((card) => (
                         <AnnotationCard
                             key={card.id}
                             annotation={card}
-                            onOpen={onOpenAnnotation}
+                            onOpen={(c) =>
+                                openAnnotation(
+                                    app,
+                                    c.libraryID,
+                                    c.attachmentKey,
+                                    c.id,
+                                )
+                            }
                         />
                     ))}
                 </div>
             )}
         </div>
+    );
+}
+
+/**
+ * The details of one item, loaded from the worker and kept up to date.
+ * `item` null shows nothing.
+ */
+export function useItemDetails(
+    item: { libraryID: number; key: string } | null,
+): EvoItemDetails | null {
+    const [details, setDetails] = useState<EvoItemDetails | null>(null);
+    const run = useRef(0);
+    const libraryID = item?.libraryID;
+    const key = item?.key;
+    const load = useCallback(() => {
+        const id = ++run.current;
+        if (libraryID === undefined || key === undefined) {
+            setDetails(null);
+            return;
+        }
+        workerBridge.evoLibrary
+            .itemDetails(libraryID, key)
+            .then((d) => {
+                if (id === run.current) setDetails(d);
+            })
+            .catch((e: unknown) =>
+                services.logService.error(
+                    "Failed to read the item",
+                    "EvoLibrary",
+                    e,
+                ),
+            );
+    }, [libraryID, key]);
+    useEffect(() => {
+        // A moment's wait: arrowing through a table loads only where it stops.
+        const timer = window.setTimeout(load, 80);
+        return () => window.clearTimeout(timer);
+    }, [load]);
+    useLibraryChanges(load);
+    return details;
+}
+
+/** The details in a tab of their own, following the item selected last in any table. */
+export function DetailsTab({ app, leaf }: { app: App; leaf: WorkspaceLeaf }) {
+    const [item, setItem] = useState(() => lastSelection());
+    useEffect(() => onSelection(setItem), []);
+    const details = useItemDetails(item);
+    return (
+        <ItemDetails
+            app={app}
+            leaf={leaf}
+            details={details}
+            count={item ? 1 : 0}
+            emptyText="Select an item in a library tab."
+        />
     );
 }

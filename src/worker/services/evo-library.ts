@@ -4,9 +4,14 @@
  * (which attachment is primary, how names are written) are in
  * `utils/evo-library-model.ts`; the views in `ui/evo-library/`. See FORK.md.
  */
+import { Liquid } from "liquidjs";
+
 import { db, getCombinations } from "db/db";
 import { getAnnotationJson } from "db/annotation";
+import { mutateItems } from "db/mutate";
+import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import {
+    DEFAULT_ATTACH_FILENAME,
     attachmentKind,
     bestKind,
     choosePrimaryAttachment,
@@ -14,12 +19,14 @@ import {
     fullName,
     lastName,
     mainCreators,
+    sanitizeFilename,
 } from "utils/evo-library-model";
 import { extractYear } from "utils/date";
 import { getField } from "utils/zotero-fields";
 import { Zotero_Item_Types } from "types/zotero-item-const";
 
 import type { LibraryService } from "./library";
+import type { IParentProxy } from "bridge/types";
 import type { ZotFlowSettings } from "settings/types";
 import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
 import type { AnnotationJSON } from "types/zotero-reader";
@@ -106,11 +113,176 @@ function field(item: AnyIDBZoteroItem, name: string): string {
     return getField({ ...data, itemType: item.itemType }, name) ?? "";
 }
 
+/** What an edit from the library browser changed. */
+export interface EvoEditResult {
+    /** Items written. */
+    changed: number;
+    /** Items left as they were (already so, gone, or not top-level). */
+    skipped: number;
+}
+
 export class EvoLibraryService {
     constructor(
         private settings: ZotFlowSettings,
         private library: LibraryService,
+        private parentHost?: IParentProxy,
     ) {}
+
+    /**
+     * Whether items of this library may be changed from here: it syncs both
+     * ways and the API key may write to it.
+     */
+    private async assertWritable(libraryID: number): Promise<void> {
+        if (
+            !this.library.isBidirectional(libraryID) ||
+            !(await this.library.canWrite(libraryID))
+        ) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.AUTH_INVALID,
+                "EvoLibraryService",
+                "This library is read-only in ZotFlow.",
+            );
+        }
+    }
+
+    /** Edit the item data of top-level items; `edit` returns whether it changed anything. */
+    private async editItems(
+        libraryID: number,
+        keys: string[],
+        edit: (data: Record<string, unknown>) => boolean,
+    ): Promise<EvoEditResult> {
+        await this.assertWritable(libraryID);
+        const notes = await this.library.hasNotesAccess(libraryID);
+        const rows = await db.items.bulkGet(
+            keys.map((k): [number, string] => [libraryID, k]),
+        );
+        const eligible = rows.filter(
+            (r): r is AnyIDBZoteroItem =>
+                !!r &&
+                !r.parentItem &&
+                r.itemType !== "annotation" &&
+                (notes || r.itemType !== "note"),
+        );
+        const edits = eligible.map((r) => ({
+            key: r.key,
+            edit: (data: object) => {
+                edit(data as Record<string, unknown>);
+            },
+        }));
+        // What would change, decided on the rows as they are; the edit
+        // itself runs again inside the write.
+        const willChange = eligible.filter((r) =>
+            edit(
+                structuredClone(r.raw.data) as unknown as Record<
+                    string,
+                    unknown
+                >,
+            ),
+        );
+        const written = await mutateItems(
+            libraryID,
+            edits.filter((e) => willChange.some((r) => r.key === e.key)),
+        );
+        const changed = written.filter(Boolean).length;
+        if (changed) this.parentHost?.emit("treeChanged");
+        return { changed, skipped: keys.length - changed };
+    }
+
+    /** Put items into a collection (they stay in the others they are in). */
+    async addToCollection(
+        libraryID: number,
+        keys: string[],
+        collectionKey: string,
+    ): Promise<EvoEditResult> {
+        return this.editItems(libraryID, keys, (data) => {
+            const list = Array.isArray(data.collections)
+                ? (data.collections as string[])
+                : [];
+            if (list.includes(collectionKey)) return false;
+            data.collections = [...list, collectionKey];
+            return true;
+        });
+    }
+
+    /** Take items out of one collection (not out of the ones inside it). */
+    async removeFromCollection(
+        libraryID: number,
+        keys: string[],
+        collectionKey: string,
+    ): Promise<EvoEditResult> {
+        return this.editItems(libraryID, keys, (data) => {
+            const list = Array.isArray(data.collections)
+                ? (data.collections as string[])
+                : [];
+            if (!list.includes(collectionKey)) return false;
+            data.collections = list.filter((k) => k !== collectionKey);
+            return true;
+        });
+    }
+
+    /** Move items to the trash, as Zotero does: `deleted` is set; they can be restored there. */
+    async trashItems(
+        libraryID: number,
+        keys: string[],
+    ): Promise<EvoEditResult> {
+        return this.editItems(libraryID, keys, (data) => {
+            if (data.deleted) return false;
+            data.deleted = 1;
+            return true;
+        });
+    }
+
+    /** What the name of a file saved to an item is made of. */
+    async filenameParts(
+        libraryID: number,
+        key: string,
+    ): Promise<{
+        lastName: string;
+        year: string;
+        shortTitle: string;
+        title: string;
+        itemType: string;
+    } | null> {
+        const item = await db.items.get([libraryID, key]);
+        if (!item) return null;
+        const main = mainCreators(creatorsOf(item));
+        const title = item.title || field(item, "title");
+        return {
+            lastName: main[0] ? lastName(main[0]) : "",
+            year: extractYear(field(item, "date")),
+            shortTitle: field(item, "shortTitle") || title,
+            title,
+            itemType: item.itemType,
+        };
+    }
+
+    private readonly filenameEngine = new Liquid({ greedy: false });
+
+    /**
+     * The name (without extension) a file saved to this item gets: the
+     * "file name" template (`evoAttachFilename`) over `filenameParts()`,
+     * made safe for file systems. The default template where the user's
+     * fails or renders nothing.
+     */
+    async attachFilename(libraryID: number, key: string): Promise<string> {
+        const parts = await this.filenameParts(libraryID, key);
+        if (!parts) return "";
+        const render = async (template: string) =>
+            sanitizeFilename(
+                String(
+                    await this.filenameEngine.parseAndRender(template, parts),
+                ),
+            ).replace(/^[_ -]+|[_ -]+$/g, "");
+        try {
+            const name = await render(
+                this.settings.evoAttachFilename || DEFAULT_ATTACH_FILENAME,
+            );
+            if (name) return name;
+        } catch {
+            // The default below.
+        }
+        return (await render(DEFAULT_ATTACH_FILENAME)) || "file";
+    }
 
     updateSettings(settings: ZotFlowSettings) {
         this.settings = settings;
@@ -162,8 +334,13 @@ export class EvoLibraryService {
             });
         }
         // The personal library first, then the groups by name.
-        const user = (n: EvoLibraryNode) => libraries.find((l) => l.id === n.libraryID)?.type === "user";
-        return out.sort((a, b) => Number(user(b)) - Number(user(a)) || collator.compare(a.name, b.name));
+        const user = (n: EvoLibraryNode) =>
+            libraries.find((l) => l.id === n.libraryID)?.type === "user";
+        return out.sort(
+            (a, b) =>
+                Number(user(b)) - Number(user(a)) ||
+                collator.compare(a.name, b.name),
+        );
     }
 
     /** The collection and every collection inside it. */

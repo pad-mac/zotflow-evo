@@ -4,19 +4,42 @@
  * markdown, an annotation card (as in the reader's note strip), a hook that
  * follows changes to the library. See FORK.md.
  */
-import { Component, MarkdownRenderer, setIcon } from "obsidian";
+import { Component, MarkdownRenderer, getIconIds, setIcon } from "obsidian";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { services } from "services/services";
 import { setAnnotationDrag } from "ui/evo-library/actions";
+import { titleRuns } from "utils/evo-library-model";
 
 import type { DraggedAnnotation } from "ui/evo-library/actions";
 
+/** The icon of "the annotations of this collection" (Lucide; `ANNOTATIONS_ICON_FALLBACK` where missing). */
+export const ANNOTATIONS_ICON = "message-square-quote";
+export const ANNOTATIONS_ICON_FALLBACK = "quote";
+
+/** `name` if this Obsidian has that icon, else `fallback` (for menus and tabs). */
+export function iconOr(name: string, fallback: string): string {
+    try {
+        const ids = getIconIds();
+        return ids.includes(name) || ids.includes("lucide-" + name)
+            ? name
+            : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+/**
+ * An Obsidian (Lucide) icon. `fallback` is drawn when this Obsidian does
+ * not have `name` (icons come and go between Lucide versions).
+ */
 export function Icon({
     name,
+    fallback,
     className,
 }: {
     name: string;
+    fallback?: string;
     className?: string;
 }) {
     const ref = useRef<HTMLSpanElement>(null);
@@ -25,13 +48,33 @@ export function Icon({
         if (!el) return;
         el.empty();
         setIcon(el, name);
-    }, [name]);
+        if (!el.firstElementChild && fallback) setIcon(el, fallback);
+    }, [name, fallback]);
     return (
         <span
             ref={ref}
             className={"zotflow-evo-icon" + (className ? " " + className : "")}
             aria-hidden="true"
         />
+    );
+}
+
+/**
+ * A title as Zotero stores it: `<i>…</i>` drawn in italics, any other
+ * markup left out (titleRuns()).
+ */
+export function Title({ text }: { text: string }) {
+    const runs = titleRuns(text);
+    return (
+        <>
+            {runs.map((run, i) =>
+                run.italic ? (
+                    <i key={i}>{run.text}</i>
+                ) : (
+                    <React.Fragment key={i}>{run.text}</React.Fragment>
+                ),
+            )}
+        </>
     );
 }
 
@@ -104,7 +147,7 @@ export function AnnotationCard({
     ) : null;
 
     function handleClick(event: React.MouseEvent) {
-        const selection = window.getSelection();
+        const selection = event.currentTarget.ownerDocument.getSelection();
         if (
             selection &&
             !selection.isCollapsed &&
@@ -121,11 +164,13 @@ export function AnnotationCard({
         );
         if (!row) return;
         row.draggable = false;
+        // The card's own document: the view may be in a pop-out window.
+        const doc = row.ownerDocument;
         const restore = () => {
-            document.removeEventListener("pointerup", restore, true);
+            doc.removeEventListener("pointerup", restore, true);
             row.draggable = true;
         };
-        document.addEventListener("pointerup", restore, true);
+        doc.addEventListener("pointerup", restore, true);
     }
 
     function drag(event: React.DragEvent, source: "highlight" | "comment") {

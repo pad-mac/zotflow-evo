@@ -3,10 +3,17 @@
  * scope, filtered, sorted — and which of them are selected. Shared by the
  * library browser and the collection tabs. See FORK.md.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import { removeItemsFromCollection, trashItems } from "ui/evo-library/actions";
 import { useLibraryChanges } from "ui/evo-library/parts";
 import {
     COLUMNS,
@@ -18,6 +25,7 @@ import {
     sortRows,
 } from "utils/evo-library-model";
 
+import type { RowPrompt } from "ui/evo-library/ItemTable";
 import type { ColumnId, EvoItemRow, SortSpec } from "utils/evo-library-model";
 import type { EvoScope } from "worker/services/evo-library";
 
@@ -62,14 +70,20 @@ export function useTableSettings(which: "library" | "collection") {
         },
         [key],
     );
-    const setWidth = useCallback((column: ColumnId, width: number) => {
-        setWidths((current) => {
-            const next = { ...current, [column]: width };
-            services.settings.evoColumnWidths = next;
-            saveSettings();
-            return next;
-        });
-    }, []);
+    const changeWidths = useCallback(
+        (change: Partial<Record<ColumnId, number>>) => {
+            setWidths((current) => {
+                const next = { ...current, ...change } as Record<
+                    string,
+                    number
+                >;
+                services.settings.evoColumnWidths = next;
+                saveSettings();
+                return next;
+            });
+        },
+        [],
+    );
     const toggleSort = useCallback((column: ColumnId) => {
         setSortState((current) => {
             const next =
@@ -82,7 +96,14 @@ export function useTableSettings(which: "library" | "collection") {
         });
     }, []);
 
-    return { columns, setColumns, widths, setWidth, sort, toggleSort };
+    return {
+        columns,
+        setColumns,
+        widths,
+        setWidths: changeWidths,
+        sort,
+        toggleSort,
+    };
 }
 
 /** The items of a scope, kept up to date with the library. */
@@ -198,4 +219,93 @@ export function useSelection(
         [shown, selected],
     );
     return { shown, selected, selectedRows, focusKey, select, move, selectAll };
+}
+
+/** An edit waiting for Enter: take the selection out of the collection, or trash it. */
+interface PendingEdit {
+    kind: "remove" | "trash";
+    libraryID: number;
+    collectionKey: string | null;
+    keys: string[];
+    /** The row the question is shown at. */
+    anchor: string;
+}
+
+/**
+ * Delete and Shift+Delete on a table, and the same from the item menu: a
+ * question at the selected line, confirmed with Enter. In a collection,
+ * Delete takes the selection out of it; in a whole library (as in Zotero)
+ * and with Shift+Delete everywhere it goes to the trash.
+ */
+export function useRowEditing(
+    scope: EvoScope | null,
+    sel: ReturnType<typeof useSelection>,
+    bodyRef: React.RefObject<HTMLDivElement>,
+) {
+    const [pending, setPending] = useState<PendingEdit | null>(null);
+
+    // Another selection drops the question.
+    useEffect(() => setPending(null), [sel.selected]);
+
+    // Read when asked: a menu asks with the selection its right-click made.
+    const latest = useRef({ scope, sel });
+    latest.current = { scope, sel };
+
+    const ask = useCallback(
+        (trash: boolean) => {
+            const { scope: now, sel: current } = latest.current;
+            if (!now || !current.selectedRows.length) return;
+            const anchor =
+                current.focusKey && current.selected.has(current.focusKey)
+                    ? current.focusKey
+                    : current.selectedRows[0]!.key;
+            setPending({
+                kind: trash || now.collectionKey === null ? "trash" : "remove",
+                libraryID: now.libraryID,
+                collectionKey: now.collectionKey,
+                keys: current.selectedRows.map((r) => r.key),
+                anchor,
+            });
+            bodyRef.current?.focus();
+        },
+        [bodyRef],
+    );
+
+    const confirm = useCallback(() => {
+        const edit = pending;
+        setPending(null);
+        bodyRef.current?.focus();
+        if (!edit) return;
+        if (edit.kind === "trash") void trashItems(edit.libraryID, edit.keys);
+        else if (edit.collectionKey)
+            void removeItemsFromCollection(
+                edit.libraryID,
+                edit.keys,
+                edit.collectionKey,
+            );
+    }, [pending, bodyRef]);
+
+    const cancel = useCallback(() => {
+        setPending(null);
+        bodyRef.current?.focus();
+    }, [bodyRef]);
+
+    let prompt: RowPrompt | null = null;
+    if (pending) {
+        const n = pending.keys.length;
+        const what = n === 1 ? "this item" : `${n} items`;
+        prompt =
+            pending.kind === "trash"
+                ? {
+                      key: pending.anchor,
+                      text: `Move ${what} to the trash?`,
+                      confirmLabel: "Move to trash",
+                  }
+                : {
+                      key: pending.anchor,
+                      text: `Remove ${what} from the collection?`,
+                      confirmLabel: "Remove",
+                  };
+    }
+    return { prompt, ask, confirm, cancel };
 }

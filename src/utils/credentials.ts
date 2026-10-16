@@ -1,6 +1,7 @@
 import type { SecretStorage } from "obsidian";
 
-const CREDENTIAL_KEYS = ["webdavpassword", "zoteroapikey"] as const;
+// ZotFlow Evo: "evoAnnasKey", the Anna's Archive member key.
+const CREDENTIAL_KEYS = ["webdavpassword", "zoteroapikey", "evoAnnasKey"] as const;
 
 type CredentialKey = (typeof CREDENTIAL_KEYS)[number];
 

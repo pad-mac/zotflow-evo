@@ -1,11 +1,13 @@
 /**
  * ZotFlow Evo (fork): the library browser, laid out like Zotero's main
  * window — collections on the left, the items in a table in the middle, the
- * selected item on the right. See FORK.md.
+ * selected item on the right (which a button in the toolbar shows and
+ * hides). See FORK.md.
  */
 import React, {
     useCallback,
     useEffect,
+    useImperativeHandle,
     useMemo,
     useRef,
     useState,
@@ -14,7 +16,7 @@ import React, {
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import {
-    openAnnotation,
+    addItemsToCollection,
     openAnnotationsTab,
     openBookSearch,
     openCollectionTab,
@@ -22,29 +24,41 @@ import {
     setItemsDrag,
 } from "ui/evo-library/actions";
 import { CollectionPane } from "ui/evo-library/CollectionPane";
-import { ItemDetails } from "ui/evo-library/ItemDetails";
+import { ItemDetails, useItemDetails } from "ui/evo-library/ItemDetails";
 import { ItemTable } from "ui/evo-library/ItemTable";
 import { showCollectionMenu, showItemMenu } from "ui/evo-library/menus";
-import { Icon, useLibraryChanges } from "ui/evo-library/parts";
 import {
+    ANNOTATIONS_ICON,
+    ANNOTATIONS_ICON_FALLBACK,
+    Icon,
+    useLibraryChanges,
+} from "ui/evo-library/parts";
+import { publishSelection, selectionLabel } from "ui/evo-library/selection";
+import {
+    useRowEditing,
     useScopeRows,
     useSelection,
     useTableSettings,
 } from "ui/evo-library/useItems";
-import { openAttachment } from "utils/viewer";
+import { PINNED_SIBLINGS, collectionId } from "utils/evo-library-model";
 
 import type { App, WorkspaceLeaf } from "obsidian";
+import type { CollectionTarget } from "ui/evo-library/CollectionPane";
 import type { EvoItemRow } from "utils/evo-library-model";
 import type {
     EvoCollectionNode,
-    EvoItemDetails,
     EvoLibraryNode,
     EvoScope,
 } from "worker/services/evo-library";
 
-export interface BrowserTarget {
-    libraryID: number;
-    collectionKey: string | null;
+export type BrowserTarget = CollectionTarget;
+
+/** What the view asks of the browser (commands). */
+export interface BrowserControl {
+    /** Show a library or collection; null: the first library (My Library). */
+    goTo(target: BrowserTarget | null): void;
+    /** Put the cursor in the filter field. */
+    focusFilter(): void;
 }
 
 function findName(
@@ -84,9 +98,9 @@ function startPaneResize(
     onWidth: (width: number) => void,
     onDone: (width: number) => void,
 ) {
+    if (event.button !== 0) return;
     event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    handle.setPointerCapture(event.pointerId);
+    const doc = (event.currentTarget as HTMLElement).ownerDocument;
     const startX = event.clientX;
     let width = start;
     const move = (ev: PointerEvent) => {
@@ -97,12 +111,14 @@ function startPaneResize(
         onWidth(width);
     };
     const up = () => {
-        handle.removeEventListener("pointermove", move);
-        handle.removeEventListener("pointerup", up);
+        doc.removeEventListener("pointermove", move, true);
+        doc.removeEventListener("pointerup", up, true);
+        doc.removeEventListener("pointercancel", up, true);
         onDone(width);
     };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
+    doc.addEventListener("pointermove", move, true);
+    doc.addEventListener("pointerup", up, true);
+    doc.addEventListener("pointercancel", up, true);
 }
 
 export interface LibraryBrowserProps {
@@ -110,6 +126,7 @@ export interface LibraryBrowserProps {
     leaf: WorkspaceLeaf;
     initial: BrowserTarget | null;
     onTarget: (target: BrowserTarget) => void;
+    control?: React.Ref<BrowserControl>;
 }
 
 export function LibraryBrowser({
@@ -117,6 +134,7 @@ export function LibraryBrowser({
     leaf,
     initial,
     onTarget,
+    control,
 }: LibraryBrowserProps) {
     const [libraries, setLibraries] = useState<EvoLibraryNode[]>([]);
     const [target, setTarget] = useState<BrowserTarget | null>(initial);
@@ -127,7 +145,17 @@ export function LibraryBrowser({
     const [panes, setPanes] = useState(() => ({
         ...services.settings.evoLibraryPanes,
     }));
-    const [details, setDetails] = useState<EvoItemDetails | null>(null);
+    const [detailsShown, setDetailsShown] = useState(
+        services.settings.evoLibraryDetailsShown !== false,
+    );
+    const [pinned, setPinned] = useState<string[]>(() => [
+        ...(services.settings.evoPinnedCollections ?? []),
+    ]);
+    const [orders, setOrders] = useState<Record<string, string[]>>(() => ({
+        ...(services.settings.evoCollectionOrder ?? {}),
+    }));
+    const filterRef = useRef<HTMLInputElement>(null);
+    const bodyRef = useRef<HTMLDivElement>(null);
 
     const loadLibraries = useCallback(() => {
         workerBridge.evoLibrary
@@ -161,6 +189,28 @@ export function LibraryBrowser({
         if (target) onTarget(target);
     }, [target, onTarget]);
 
+    useImperativeHandle(
+        control,
+        () => ({
+            goTo(next) {
+                const first = libraries[0];
+                const to =
+                    next ??
+                    (first
+                        ? { libraryID: first.libraryID, collectionKey: null }
+                        : null);
+                if (to) setTarget(to);
+            },
+            focusFilter() {
+                const input = filterRef.current;
+                if (!input) return;
+                input.focus();
+                input.select();
+            },
+        }),
+        [libraries],
+    );
+
     const scope = useMemo<EvoScope | null>(
         () =>
             target
@@ -175,39 +225,69 @@ export function LibraryBrowser({
     const { rows, loading } = useScopeRows(scope);
     const table = useTableSettings("library");
     const sel = useSelection(rows, filter, table.sort);
+    const editing = useRowEditing(scope, sel, bodyRef);
 
-    // The right pane follows the focused row.
-    const detailsRun = useRef(0);
-    const loadDetails = useCallback(() => {
-        const row = sel.shown.find((r) => r.key === sel.focusKey);
-        const id = ++detailsRun.current;
-        if (!row) {
-            setDetails(null);
-            return;
-        }
-        workerBridge.evoLibrary
-            .itemDetails(row.libraryID, row.key)
-            .then((d) => {
-                if (id === detailsRun.current) setDetails(d);
-            })
-            .catch((e: unknown) =>
-                services.logService.error(
-                    "Failed to read the item",
-                    "EvoLibrary",
-                    e,
-                ),
-            );
-    }, [sel.focusKey, sel.shown]);
+    const focused = sel.shown.find((r) => r.key === sel.focusKey) ?? null;
+    const details = useItemDetails(detailsShown ? focused : null);
+
+    // The item details tab and "save to the selected item" follow this.
     useEffect(() => {
-        const timer = window.setTimeout(loadDetails, 80);
-        return () => window.clearTimeout(timer);
-    }, [loadDetails]);
-    useLibraryChanges(loadDetails);
+        if (focused)
+            publishSelection({
+                libraryID: focused.libraryID,
+                key: focused.key,
+                label: selectionLabel(focused),
+                itemType: focused.itemType,
+            });
+    }, [focused]);
 
     const setSub = useCallback((on: boolean) => {
         setSubcollections(on);
         services.settings.evoLibrarySubcollections = on;
         saveSettings();
+    }, []);
+
+    const toggleDetails = useCallback(() => {
+        setDetailsShown((on) => {
+            services.settings.evoLibraryDetailsShown = !on;
+            saveSettings();
+            return !on;
+        });
+    }, []);
+
+    const pin = useCallback((id: string, on: boolean) => {
+        setPinned((current) => {
+            const next = on
+                ? current.includes(id)
+                    ? current
+                    : [...current, id]
+                : current.filter((p) => p !== id);
+            services.settings.evoPinnedCollections = next;
+            saveSettings();
+            return next;
+        });
+    }, []);
+
+    const reorder = useCallback((siblings: string, order: string[]) => {
+        if (siblings === PINNED_SIBLINGS) {
+            setPinned((current) => {
+                // Pins not shown (their library is gone, say) keep their place at the end.
+                const next = [
+                    ...order,
+                    ...current.filter((p) => !order.includes(p)),
+                ];
+                services.settings.evoPinnedCollections = next;
+                saveSettings();
+                return next;
+            });
+            return;
+        }
+        setOrders((current) => {
+            const next = { ...current, [siblings]: order };
+            services.settings.evoCollectionOrder = next;
+            saveSettings();
+            return next;
+        });
     }, []);
 
     const rootRef = useRef<HTMLDivElement>(null);
@@ -243,12 +323,14 @@ export function LibraryBrowser({
     };
 
     const name = findName(libraries, target);
-    const focused = sel.shown.find((r) => r.key === sel.focusKey) ?? null;
 
     return (
         <div
             ref={rootRef}
-            className="zotflow-evo-browser"
+            className={
+                "zotflow-evo-browser" +
+                (detailsShown ? "" : " is-details-hidden")
+            }
             style={
                 {
                     "--zotflow-evo-pane-collections": panes.collections + "px",
@@ -260,11 +342,17 @@ export function LibraryBrowser({
                 <CollectionPane
                     libraries={libraries}
                     scope={scope}
+                    pinned={pinned}
+                    orders={orders}
                     onSelect={(t) => setTarget(t)}
                     onOpenTab={(t) =>
                         void openCollectionTab(app, { ...t, subcollections })
                     }
-                    onMenu={(t, e) =>
+                    onMenu={(t, e) => {
+                        const id =
+                            t.collectionKey === null
+                                ? null
+                                : collectionId(t.libraryID, t.collectionKey);
                         showCollectionMenu(
                             app,
                             { ...t, subcollections },
@@ -272,7 +360,18 @@ export function LibraryBrowser({
                             {
                                 subcollections,
                                 onSubcollections: setSub,
+                                pinned: id ? pinned.includes(id) : undefined,
+                                onPin: id ? (on) => pin(id, on) : undefined,
                             },
+                        );
+                    }}
+                    onReorder={reorder}
+                    onDropItems={(items, collection) =>
+                        void addItemsToCollection(
+                            items.libraryID,
+                            items.keys,
+                            collection.key,
+                            collection.name,
                         )
                     }
                 />
@@ -290,11 +389,22 @@ export function LibraryBrowser({
                         {loading ? "…" : sel.shown.length}
                     </span>
                     <input
+                        ref={filterRef}
                         className="zotflow-evo-filter"
                         type="search"
                         placeholder="Filter"
                         value={filter}
                         onChange={(e) => setFilter(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "ArrowDown" || e.key === "Enter") {
+                                e.preventDefault();
+                                bodyRef.current?.focus();
+                                if (!sel.focusKey) sel.move(1, false);
+                            } else if (e.key === "Escape" && filter) {
+                                e.preventDefault();
+                                setFilter("");
+                            }
+                        }}
                     />
                     <span
                         className={
@@ -314,7 +424,24 @@ export function LibraryBrowser({
                             scope && void openAnnotationsTab(app, scope)
                         }
                     >
-                        <Icon name="highlighter" />
+                        <Icon
+                            name={ANNOTATIONS_ICON}
+                            fallback={ANNOTATIONS_ICON_FALLBACK}
+                        />
+                    </span>
+                    <span
+                        className={
+                            "zotflow-evo-tool" + (detailsShown ? " is-on" : "")
+                        }
+                        title={
+                            detailsShown
+                                ? "Hide the item pane"
+                                : "Show the item pane"
+                        }
+                        aria-pressed={detailsShown}
+                        onClick={toggleDetails}
+                    >
+                        <Icon name="panel-right" />
                     </span>
                 </div>
                 <ItemTable
@@ -324,6 +451,8 @@ export function LibraryBrowser({
                     sort={table.sort}
                     selected={sel.selected}
                     focusKey={sel.focusKey}
+                    prompt={editing.prompt}
+                    bodyRef={bodyRef}
                     emptyText={
                         loading
                             ? "Loading…"
@@ -333,7 +462,7 @@ export function LibraryBrowser({
                     }
                     onSort={table.toggleSort}
                     onColumns={table.setColumns}
-                    onWidth={table.setWidth}
+                    onWidths={table.setWidths}
                     onSelect={sel.select}
                     onSelectAll={sel.selectAll}
                     onMove={sel.move}
@@ -345,32 +474,37 @@ export function LibraryBrowser({
                                 metaKey: false,
                                 shiftKey: false,
                             });
-                        showItemMenu(app, leaf, row, e.nativeEvent);
+                        showItemMenu(app, leaf, row, e.nativeEvent, {
+                            onRemove:
+                                scope?.collectionKey != null
+                                    ? () => editing.ask(false)
+                                    : undefined,
+                            onTrash: () => editing.ask(true),
+                        });
                     }}
                     onDragRows={dragRows}
                     onSearch={(row) => void openBookSearch(app, leaf, row)}
+                    onDeleteKey={editing.ask}
+                    onPromptConfirm={editing.confirm}
+                    onPromptCancel={editing.cancel}
                 />
             </div>
-            <div
-                className="zotflow-evo-split"
-                onPointerDown={(e) => resize("details", e)}
-            />
-            <div className="zotflow-evo-pane is-details">
-                <ItemDetails
-                    details={details}
-                    count={sel.selected.size}
-                    onOpenAttachment={(key) =>
-                        details &&
-                        void openAttachment(details.libraryID, key, app)
-                    }
-                    onOpenAnnotation={(a) =>
-                        openAnnotation(app, a.libraryID, a.attachmentKey, a.id)
-                    }
-                    onSearch={() =>
-                        focused && void openBookSearch(app, leaf, focused)
-                    }
-                />
-            </div>
+            {detailsShown && (
+                <>
+                    <div
+                        className="zotflow-evo-split"
+                        onPointerDown={(e) => resize("details", e)}
+                    />
+                    <div className="zotflow-evo-pane is-details">
+                        <ItemDetails
+                            app={app}
+                            leaf={leaf}
+                            details={details}
+                            count={sel.selected.size}
+                        />
+                    </div>
+                </>
+            )}
         </div>
     );
 }

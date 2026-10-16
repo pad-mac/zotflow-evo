@@ -12,8 +12,13 @@ import { itemTypeLabel } from "types/zotero-item-type-labels";
 /*  Attachments                                                       */
 /* ------------------------------------------------------------------ */
 
-/** What an attachment is, as far as opening it goes. */
-export type AttachmentKind = "pdf" | "epub" | "snapshot" | "link" | "other";
+/**
+ * What an attachment is, as far as opening it goes. "linked": a file that
+ * lives outside Zotero's storage (a linked file), which ZotFlow does not
+ * open; "link": a link to a web page.
+ */
+export type AttachmentKind =
+    "pdf" | "epub" | "snapshot" | "linked" | "link" | "other";
 
 /** The fields of an attachment's data this module reads. */
 export interface AttachmentFacts {
@@ -24,6 +29,8 @@ export interface AttachmentFacts {
 export function attachmentKind(data: AttachmentFacts): AttachmentKind {
     // A link to a web page (Google Books, say) is never something to open.
     if (data.linkMode === "linked_url") return "link";
+    // Nor, for now, a file outside Zotero's storage.
+    if (data.linkMode === "linked_file") return "linked";
     switch (data.contentType) {
         case "application/pdf":
             return "pdf";
@@ -58,12 +65,63 @@ export function choosePrimaryAttachment<T>(
     return { primary: null, choices: [] };
 }
 
-/** The best kind an item has, for the indicator in the table. */
+/** Kinds shown in the attachment column, best first. */
+const SHOWN: readonly AttachmentKind[] = [...OPENABLE, "linked"];
+
+/**
+ * The best kind an item has, for the indicator in the table: what it
+ * opens, else a linked file (marked, not opened), else nothing.
+ */
 export function bestKind(
     kinds: readonly AttachmentKind[],
 ): AttachmentKind | null {
-    for (const kind of OPENABLE) if (kinds.includes(kind)) return kind;
+    for (const kind of SHOWN) if (kinds.includes(kind)) return kind;
     return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Titles                                                            */
+/* ------------------------------------------------------------------ */
+
+/** A run of a title: plain or italic. */
+export interface TitleRun {
+    text: string;
+    italic: boolean;
+}
+
+const TAG = /<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g;
+
+/**
+ * A title as Zotero stores it, which may carry rich-text markup
+ * (`<i>…</i>`, `<b>`, `<sup>`, `<span class="nocase">`): italic is kept,
+ * every other tag dropped.
+ */
+export function titleRuns(raw: string): TitleRun[] {
+    const runs: TitleRun[] = [];
+    let depth = 0;
+    let last = 0;
+    const push = (text: string) => {
+        if (!text) return;
+        const italic = depth > 0;
+        const prev = runs[runs.length - 1];
+        if (prev && prev.italic === italic) prev.text += text;
+        else runs.push({ text, italic });
+    };
+    for (const m of raw.matchAll(TAG)) {
+        push(raw.slice(last, m.index));
+        last = (m.index ?? 0) + m[0].length;
+        const name = m[1]!.toLowerCase();
+        if (name !== "i" && name !== "em") continue;
+        if (m[0].startsWith("</")) depth = Math.max(0, depth - 1);
+        else depth++;
+    }
+    push(raw.slice(last));
+    return runs;
+}
+
+/** A title without any markup. */
+export function plainTitle(raw: string): string {
+    return raw.replace(TAG, "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -202,6 +260,45 @@ export function columnDef(id: ColumnId): ColumnDef {
 }
 
 /** Known column ids from a stored list, in order, without repeats; the title is always shown. */
+/** Narrowest a column can be dragged, in pixels. */
+const MIN_COLUMN = 30;
+
+export function widthOf(
+    column: ColumnId,
+    widths: Record<string, number>,
+): number {
+    return Math.max(MIN_COLUMN, widths[column] ?? columnDef(column).width);
+}
+
+/**
+ * What dragging the right border of `column` by `delta` pixels changes.
+ * The title column is flexible (it takes what the others leave), so its
+ * own width cannot be set: dragging its border moves the border between it
+ * and the next column, which gets narrower or wider instead. Any other
+ * column gets wider or narrower itself, and the title gives or takes the
+ * difference.
+ */
+export function resizeColumns(
+    columns: readonly ColumnId[],
+    widths: Record<string, number>,
+    column: ColumnId,
+    delta: number,
+): Partial<Record<ColumnId, number>> {
+    if (column !== "title") {
+        return {
+            [column]: Math.max(
+                MIN_COLUMN,
+                Math.round(widthOf(column, widths) + delta),
+            ),
+        };
+    }
+    const next = columns[columns.indexOf(column) + 1];
+    if (!next) return {};
+    return {
+        [next]: Math.max(MIN_COLUMN, Math.round(widthOf(next, widths) - delta)),
+    };
+}
+
 export function sanitizeColumns(
     stored: readonly string[] | undefined,
     fallback: readonly ColumnId[],
@@ -225,7 +322,7 @@ export function shortDate(iso: string): string {
 export function cellText(row: EvoItemRow, column: ColumnId): string {
     switch (column) {
         case "title":
-            return row.title;
+            return plainTitle(row.title);
         case "creator":
             return row.creator;
         case "year":
@@ -259,9 +356,9 @@ const collator = new Intl.Collator(undefined, {
     sensitivity: "base",
 });
 
-/** Leading articles and punctuation do not count in a sort by title, as in Zotero. */
+/** Markup and leading punctuation do not count in a sort by title, as in Zotero. */
 function titleKey(title: string): string {
-    return title.replace(/^[\s"'“‘«([{]+/, "");
+    return plainTitle(title).replace(/^[\s"'“‘«([{]+/, "");
 }
 
 function compareBy(column: ColumnId, a: EvoItemRow, b: EvoItemRow): number {
@@ -274,7 +371,7 @@ function compareBy(column: ColumnId, a: EvoItemRow, b: EvoItemRow): number {
             return (Number(a.year) || 0) - (Number(b.year) || 0);
         case "attachment": {
             const rank = (r: EvoItemRow) =>
-                r.attachment ? OPENABLE.indexOf(r.attachment) : OPENABLE.length;
+                r.attachment ? SHOWN.indexOf(r.attachment) : SHOWN.length;
             return rank(a) - rank(b);
         }
         case "annotations":
@@ -325,7 +422,7 @@ export function filterRows(
     if (!words.length) return [...rows];
     return rows.filter((r) => {
         const hay = [
-            r.title,
+            plainTitle(r.title),
             r.creator,
             r.firstCreator,
             r.year,
@@ -367,7 +464,7 @@ export function bookSearchUrl(
     base: string,
     item: { title: string; firstCreator: string; year: string },
 ): string {
-    const query = [item.title, item.firstCreator, item.year]
+    const query = [plainTitle(item.title), item.firstCreator, item.year]
         .map((s) => s.trim())
         .filter(Boolean)
         .join(" ");
@@ -458,7 +555,7 @@ function colorRank(hex: string | undefined): number {
 export function itemReference(item: EvoAnnotatedItem | undefined): string {
     if (!item) return "";
     const who = [item.creator, item.year].filter(Boolean).join(" ");
-    const what = item.shortTitle || item.title;
+    const what = plainTitle(item.shortTitle || item.title);
     return `(${[who, what].filter(Boolean).join(", ")})`;
 }
 
@@ -627,4 +724,197 @@ export function annotationColors(
     return [...used].sort(
         (a, b) => colorRank(a) - colorRank(b) || (a < b ? -1 : 1),
     );
+}
+
+/* ------------------------------------------------------------------ */
+/*  The collection pane: order and pins                               */
+/* ------------------------------------------------------------------ */
+
+/** A collection as the pane orders it. */
+export interface OrderedCollection {
+    libraryID: number;
+    key: string;
+    name: string;
+    children: OrderedCollection[];
+}
+
+/** Where a list of collections lives, for the remembered order: a parent, or the pinned list. */
+export function siblingsId(
+    libraryID: number,
+    parentKey: string | null,
+): string {
+    return `${libraryID}:${parentKey ?? ""}`;
+}
+
+export const PINNED_SIBLINGS = "pinned";
+
+/** "1:ABCD1234": a collection across libraries. */
+export function collectionId(libraryID: number, key: string): string {
+    return `${libraryID}:${key}`;
+}
+
+/**
+ * Siblings in the remembered order: those named in `order` first, in that
+ * order; the rest after them by name (new collections land at the end).
+ */
+export function orderSiblings<T extends { key: string; name: string }>(
+    nodes: readonly T[],
+    order: readonly string[] | undefined,
+): T[] {
+    const rank = new Map((order ?? []).map((key, i) => [key, i]));
+    return [...nodes].sort((a, b) => {
+        const ra = rank.get(a.key);
+        const rb = rank.get(b.key);
+        if (ra !== undefined || rb !== undefined) {
+            if (ra === undefined) return 1;
+            if (rb === undefined) return -1;
+            return ra - rb;
+        }
+        return collator.compare(a.name, b.name);
+    });
+}
+
+/** Every level of a tree in the remembered order. */
+export function orderTree<T extends OrderedCollection>(
+    nodes: readonly T[],
+    orders: Readonly<Record<string, string[]>>,
+    libraryID: number,
+    parentKey: string | null,
+): T[] {
+    return orderSiblings(nodes, orders[siblingsId(libraryID, parentKey)]).map(
+        (n) => ({
+            ...n,
+            children: orderTree(n.children as T[], orders, libraryID, n.key),
+        }),
+    );
+}
+
+/**
+ * `keys` (the siblings as shown) with `dragged` put before or after
+ * `target`. Unchanged if either is not among them.
+ */
+export function moveKey(
+    keys: readonly string[],
+    dragged: string,
+    target: string,
+    after: boolean,
+): string[] {
+    if (
+        dragged === target ||
+        !keys.includes(dragged) ||
+        !keys.includes(target)
+    ) {
+        return [...keys];
+    }
+    const rest = keys.filter((k) => k !== dragged);
+    const at = rest.indexOf(target) + (after ? 1 : 0);
+    rest.splice(at, 0, dragged);
+    return rest;
+}
+
+/**
+ * Pinned collections taken out of their place in the tree: the pinned ones
+ * (each with everything inside it) in the order of `pinned`, and the
+ * trees without them. A pin whose collection is gone is skipped.
+ */
+export function splitPinned<T extends OrderedCollection>(
+    libraries: readonly { libraryID: number; collections: T[] }[],
+    pinned: readonly string[],
+): { pinned: T[]; trees: T[][] } {
+    const wanted = new Set(pinned);
+    const found = new Map<string, T>();
+    const strip = (nodes: T[]): T[] =>
+        nodes.flatMap((n) => {
+            const id = collectionId(n.libraryID, n.key);
+            if (wanted.has(id)) {
+                found.set(id, n);
+                return [];
+            }
+            return [{ ...n, children: strip(n.children as T[]) }];
+        });
+    const trees = libraries.map((lib) => strip(lib.collections));
+    return {
+        pinned: pinned.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])),
+        trees,
+    };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Files saved to an item                                            */
+/* ------------------------------------------------------------------ */
+
+/** The default name of a file saved to an item (LiquidJS; see FORK.md). */
+export const DEFAULT_ATTACH_FILENAME =
+    '{{ lastName | downcase }}_{{ year }}_{{ shortTitle | downcase | replace: " ", "_" }}';
+
+/**
+ * A rendered name made safe as a file name: markup and characters no file
+ * system takes removed, runs of spaces and underscores folded, at most
+ * `max` characters, never empty. The extension is added after.
+ */
+export function sanitizeFilename(name: string, max = 120): string {
+    const cleaned = plainTitle(name)
+        // eslint-disable-next-line no-control-regex -- control characters are exactly what file names must not hold
+        .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/_{2,}/g, "_")
+        .replace(/^[\s._]+|[\s._]+$/g, "")
+        .trim();
+    const cut = [...cleaned]
+        .slice(0, max)
+        .join("")
+        .replace(/[\s._]+$/g, "");
+    return cut || "file";
+}
+
+/** What kind of file the bytes are, if one Zotero should store: PDF, EPUB, DjVu. */
+export function sniffFile(
+    bytes: ArrayBuffer,
+): { contentType: string; extension: string } | null {
+    const head = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 1024));
+    const text = String.fromCharCode(...head);
+    if (text.includes("%PDF-"))
+        return { contentType: "application/pdf", extension: "pdf" };
+    if (
+        text.startsWith("PK\u0003\u0004") &&
+        text.includes("mimetypeapplication/epub+zip")
+    )
+        return { contentType: "application/epub+zip", extension: "epub" };
+    if (text.startsWith("AT&TFORM"))
+        return { contentType: "image/vnd.djvu", extension: "djvu" };
+    return null;
+}
+
+/** The MD5 of a book in an Anna's Archive address (/md5/…, /fast_download/…, a viewer). */
+export function md5FromUrl(url: string): string | null {
+    let text = url;
+    try {
+        text = decodeURIComponent(url);
+    } catch {
+        // As it is.
+    }
+    const m =
+        /\/(?:md5|fast_download|slow_download|view|viewer)\/([a-f0-9]{32})\b/i.exec(
+            text,
+        ) ?? /[?&]md5=([a-f0-9]{32})\b/i.exec(text);
+    return m ? m[1]!.toLowerCase() : null;
+}
+
+/** File addresses inside an address (a viewer's `?file=…`). */
+export function embeddedUrls(url: string): string[] {
+    try {
+        const parsed = new URL(url);
+        const out: string[] = [];
+        parsed.searchParams.forEach((value) => {
+            if (/^https?:\/\//i.test(value)) out.push(value);
+        });
+        // pdf.js viewers put it in the hash too: #file=…
+        const hash = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+        hash.forEach((value) => {
+            if (/^https?:\/\//i.test(value)) out.push(value);
+        });
+        return out;
+    } catch {
+        return [];
+    }
 }

@@ -6,7 +6,7 @@
  * The fork's reader-view logic lives here so the upstream view files only
  * gain a few calls into this module. See FORK.md.
  */
-import { setIcon } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 
 import { workerBridge } from "bridge";
 import { EventBus } from "services/event-bus";
@@ -17,6 +17,7 @@ import type { ItemView, Plugin } from "obsidian";
 import type {
     ColorScheme,
     CreateReaderOptions,
+    NoteStripAction,
     NoteStripBanner,
     ReaderNoteStrip,
 } from "types/zotero-reader";
@@ -38,8 +39,7 @@ type ChromeSetting =
  * metadata fills the banner template, or just a name (a local file).
  */
 export type NoteStripSubject =
-    | { libraryID: number; key: string; fallback: string }
-    | { text: string };
+    { libraryID: number; key: string; fallback: string } | { text: string };
 
 /** Fires after a reader chrome setting changed; every open reader follows. */
 const chromeChanged = new EventBus<[]>();
@@ -243,13 +243,22 @@ function setActionIcon(el: HTMLElement, icon: string, fallback: string) {
  * The buttons change the shared settings; this object keeps its own view's
  * buttons and reader in step with them.
  */
+/** Hides an Obsidian view's header (styles.css; on a phone it stays). */
+const HEADERLESS_CLASS = "zotflow-evo-headerless";
+
+/** Numbers the header buttons mirrored into note strips. */
+let actionCount = 0;
+
 class ReaderChromeControls {
     private readonly toolbarAction: HTMLElement;
     private readonly stripAction: HTMLElement;
     private readonly stripListAction: HTMLElement;
+    /** What was last sent to the strip, to send only changes. */
+    private sentActions = "";
+    private readonly withActionListener = new WeakSet<IframeReaderBridge>();
 
     constructor(
-        view: ItemView,
+        private readonly view: ItemView,
         private readonly getBridge: () => IframeReaderBridge | undefined,
         private readonly getSubject: () => NoteStripSubject | undefined,
     ) {
@@ -272,10 +281,87 @@ class ReaderChromeControls {
         view.register(chromeChanged.subscribe(() => this.apply()));
         view.register(
             readerOpened.subscribe((bridge) => {
-                if (bridge === this.getBridge()) this.render();
+                if (bridge !== this.getBridge()) return;
+                this.listenForActions(bridge);
+                this.sentActions = "";
+                this.render();
             }),
         );
+        view.register(() => view.containerEl.removeClass(HEADERLESS_CLASS));
         this.render();
+    }
+
+    /**
+     * Whether the view's header is hidden: while the note strip is shown
+     * beside a document that has one (its head shows the header's buttons).
+     * Not on a phone, where the header holds the way back.
+     */
+    private headerless(): boolean {
+        const type = this.getBridge()?.documentType;
+        return (
+            !Platform.isMobile &&
+            !!type &&
+            hasNoteStrip(type) &&
+            services.settings.readerNoteStripVisible
+        );
+    }
+
+    /** The header's buttons as they are now (shown ones only), for the strip. */
+    private headerActions(): NoteStripAction[] {
+        const bar = this.view.containerEl.querySelector(".view-actions");
+        if (!bar) return [];
+        const out: NoteStripAction[] = [];
+        for (const el of Array.from(
+            bar.querySelectorAll<HTMLElement>(".view-action"),
+        )) {
+            if (el.style.display === "none" || el.hidden) continue;
+            const id = (el.dataset.zfEvoAction ??= String(++actionCount));
+            out.push({
+                id,
+                title: el.getAttribute("aria-label") ?? "",
+                icon: el.querySelector("svg")?.outerHTML ?? "",
+            });
+        }
+        return out;
+    }
+
+    /** A mirrored button clicked in the strip: click the real one, where it was clicked. */
+    private listenForActions(bridge: IframeReaderBridge) {
+        if (this.withActionListener.has(bridge)) return;
+        this.withActionListener.add(bridge);
+        bridge.onEventType("noteStripAction", (event) => {
+            const el = this.view.containerEl.querySelector<HTMLElement>(
+                `.view-actions [data-zf-evo-action="${CSS.escape(event.id)}"]`,
+            );
+            if (!el) return;
+            const frame = this.view.containerEl.querySelector("iframe");
+            const box = frame?.getBoundingClientRect();
+            const win = el.ownerDocument.defaultView ?? window;
+            el.dispatchEvent(
+                new win.MouseEvent("click", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: (box?.left ?? 0) + event.x,
+                    clientY: (box?.top ?? 0) + event.y,
+                }),
+            );
+        });
+    }
+
+    /** Hide or show the header, and send the strip the buttons to show for it. */
+    private applyHeader() {
+        const hide = this.headerless();
+        this.view.containerEl.toggleClass(HEADERLESS_CLASS, hide);
+        const bridge = this.getBridge();
+        if (!bridge || bridge.state !== "reader-ready") return;
+        const actions = hide ? this.headerActions() : [];
+        const key = JSON.stringify(actions);
+        if (key === this.sentActions) return;
+        this.sentActions = key;
+        ff(
+            bridge.setNoteStrip({ actions }),
+            "Failed to show the view's buttons in the note strip",
+        );
     }
 
     /** Bring this view's buttons and reader in line with the settings. */
@@ -293,9 +379,7 @@ class ReaderChromeControls {
             return;
         }
         ff(
-            bridge.setToolbarHidden(
-                services.settings.readerToolbarHidden,
-            ),
+            bridge.setToolbarHidden(services.settings.readerToolbarHidden),
             "Failed to toggle the reader toolbar",
         );
         // The strip follows at once; its banner when the template has rendered.
@@ -353,6 +437,8 @@ class ReaderChromeControls {
             "aria-label",
             asList ? "Show notes beside the page" : "Show notes as a list",
         );
+
+        this.applyHeader();
     }
 }
 

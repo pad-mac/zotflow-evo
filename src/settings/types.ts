@@ -1,5 +1,6 @@
 import {
     DEFAULT_ANNOTATION_LAYOUT,
+    DEFAULT_ATTACH_FILENAME,
     DEFAULT_BOOK_SEARCH_URL,
     DEFAULT_COLLECTION_COLUMNS,
     DEFAULT_LIBRARY_COLUMNS,
@@ -139,6 +140,16 @@ export interface ZotFlowSettings {
     evoAnnotationLayout: AnnotationLayout;
     /** ZotFlow Evo: the search an item without a file opens; the query is appended. */
     evoBookSearchUrl: string;
+    /** ZotFlow Evo: collections pinned to the top of the library browser ("libraryID:key"), in order. */
+    evoPinnedCollections: string[];
+    /** ZotFlow Evo: the order of collections set by dragging them, by parent ("libraryID:parentKey", or "pinned"). */
+    evoCollectionOrder: Record<string, string[]>;
+    /** ZotFlow Evo: the library browser shows the selected item on the right. */
+    evoLibraryDetailsShown: boolean;
+    /** ZotFlow Evo: LiquidJS template for the name of a file saved to an item (without extension). */
+    evoAttachFilename: string;
+    /** ZotFlow Evo: Anna's Archive member key for its download API (kept in SecretStorage, not data.json). */
+    evoAnnasKey?: string;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -268,6 +279,10 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoLibraryPanes: { collections: 240, details: 360 },
     evoAnnotationLayout: { ...DEFAULT_ANNOTATION_LAYOUT },
     evoBookSearchUrl: DEFAULT_BOOK_SEARCH_URL,
+    evoPinnedCollections: [],
+    evoCollectionOrder: {},
+    evoLibraryDetailsShown: true,
+    evoAttachFilename: DEFAULT_ATTACH_FILENAME,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

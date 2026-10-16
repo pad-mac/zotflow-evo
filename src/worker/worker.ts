@@ -289,7 +289,7 @@ const exposedApi: WorkerAPI = {
             finishStage("Create document and conversion services");
 
             _cslRender = new CslRenderWorkerService(settings);
-            _evoLibrary = new EvoLibraryService(settings, _library);
+            _evoLibrary = new EvoLibraryService(settings, _library, parentHost);
             finishStage("Create CSL service");
 
             _template = new LibraryTemplateService(

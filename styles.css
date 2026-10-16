@@ -3834,6 +3834,14 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     overflow: hidden;
 }
 
+/* The views have their own title and tools: no Obsidian header above them
+   (on a phone it stays; it holds the way back). */
+body:not(.is-mobile)
+    .workspace-leaf-content.zotflow-evo-headerless
+    > .view-header {
+    display: none;
+}
+
 .zotflow-evo-view {
     --zotflow-evo-row: 26px;
     --zotflow-evo-line: 20px;
@@ -3860,6 +3868,11 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
         4px var(--zotflow-evo-pane-details, 360px);
     height: 100%;
     min-height: 0;
+}
+
+.zotflow-evo-browser.is-details-hidden {
+    grid-template-columns:
+        var(--zotflow-evo-pane-collections, 240px) 4px minmax(200px, 1fr);
 }
 
 .zotflow-evo-pane {
@@ -3922,6 +3935,27 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     font-weight: var(--font-semibold);
 }
 
+/* Pinned collections, above the libraries. */
+.zotflow-evo-lib.is-pinned {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Where a dragged collection goes, and the collection items are dropped on. */
+.zotflow-evo-coll.is-drop-before {
+    box-shadow: inset 0 2px 0 var(--interactive-accent);
+}
+
+.zotflow-evo-coll.is-drop-after {
+    box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}
+
+.zotflow-evo-coll.is-drop-into {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
 .zotflow-evo-coll-toggle {
     flex: none;
     display: inline-flex;
@@ -3938,11 +3972,6 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 .zotflow-evo-coll-toggle svg {
     width: 12px;
     height: 12px;
-}
-
-.zotflow-evo-coll-icon {
-    flex: none;
-    color: var(--text-muted);
 }
 
 .zotflow-evo-coll-name {
@@ -4082,8 +4111,15 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     touch-action: none;
 }
 
-.zotflow-evo-th-resize:hover {
+.zotflow-evo-th-resize:hover,
+.zotflow-evo-th-resize.is-dragging {
     background-color: var(--interactive-accent);
+}
+
+body.zotflow-evo-col-resizing,
+body.zotflow-evo-col-resizing * {
+    cursor: col-resize !important;
+    user-select: none;
 }
 
 .zotflow-evo-th + .zotflow-evo-th {
@@ -4171,6 +4207,11 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     opacity: 0.6;
 }
 
+/* A linked file: marked, not opened (a click says why). */
+.zotflow-evo-attachment.is-linked {
+    color: var(--text-faint);
+}
+
 .zotflow-evo-attachment:hover {
     color: var(--interactive-accent);
     opacity: 1;
@@ -4178,6 +4219,39 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 
 .zotflow-evo-tr.is-selected .zotflow-evo-attachment {
     color: inherit;
+}
+
+/* Delete / Shift+Delete: the question at the selected line. */
+.zotflow-evo-prompt {
+    position: absolute;
+    right: 6px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: var(--zotflow-evo-row);
+    padding: 0 4px 0 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background-color: var(--background-primary);
+    box-shadow: var(--shadow-s);
+    font-size: var(--font-ui-small);
+    white-space: nowrap;
+}
+
+.zotflow-evo-prompt button {
+    height: calc(var(--zotflow-evo-row) - 6px);
+    padding: 0 8px;
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-prompt kbd {
+    margin-inline-start: 6px;
+    opacity: 0.7;
+    font-size: 0.85em;
+    background: none;
+    border: none;
+    padding: 0;
 }
 
 .zotflow-evo-table-empty {
@@ -4207,8 +4281,8 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 }
 
 .zotflow-evo-details-head {
-    flex: 0 1 auto;
-    max-height: 55%;
+    flex: none;
+    max-height: 60%;
     overflow-y: auto;
     padding: 14px 16px 12px;
 }
@@ -4220,9 +4294,15 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     overflow-wrap: anywhere;
 }
 
-.zotflow-evo-details-byline {
+.zotflow-evo-details-authors {
     margin-top: 6px;
     color: var(--text-normal);
+}
+
+.zotflow-evo-details-year {
+    margin-top: 1px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
 }
 
 .zotflow-evo-details-pub {
@@ -4252,6 +4332,10 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     color: var(--text-normal);
 }
 
+.zotflow-evo-details-file.is-linked {
+    color: var(--text-faint);
+}
+
 .zotflow-evo-details-file:hover {
     color: var(--interactive-accent);
 }
@@ -4262,8 +4346,16 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
     text-overflow: ellipsis;
 }
 
+/* The abstract scrolls on its own: the head above and the annotations
+   below stay where they are. */
 .zotflow-evo-details-abstract {
-    margin-top: 14px;
+    flex: 0 1 auto;
+    box-sizing: border-box;
+    min-height: 0;
+    max-height: 35%;
+    overflow-y: auto;
+    padding: 10px 16px 12px;
+    border-top: 1px solid var(--background-modifier-border);
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     line-height: 1.55;
@@ -4272,7 +4364,7 @@ body.zotflow-hide-region-markers .cm-zotflow-meta-line:not(.cm-active) {
 }
 
 .zotflow-evo-details-annotations {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
     padding: 12px 8px 24px 4px;

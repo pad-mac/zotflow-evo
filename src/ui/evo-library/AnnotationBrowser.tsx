@@ -15,7 +15,12 @@ import React, {
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { openAnnotation } from "ui/evo-library/actions";
-import { AnnotationCard, Icon, useLibraryChanges } from "ui/evo-library/parts";
+import {
+    AnnotationCard,
+    Icon,
+    Title,
+    useLibraryChanges,
+} from "ui/evo-library/parts";
 import {
     annotationColors,
     colorName,
@@ -259,7 +264,7 @@ export function AnnotationBrowser({
                                 />
                             )}
                             <span className="zotflow-evo-annos-heading-label">
-                                {group.label}
+                                <Title text={group.label} />
                             </span>
                             {group.detail && (
                                 <span className="zotflow-evo-annos-heading-detail">

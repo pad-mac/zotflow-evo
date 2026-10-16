@@ -1,8 +1,11 @@
 /**
  * ZotFlow Evo (fork): the table of items in the library browser and the
  * collection tabs. Columns can be chosen (right-click the header), sorted
- * (click a header) and resized (drag a header's edge); only the rows on
- * screen are drawn. See FORK.md.
+ * (click a header) and resized (drag the border between two headers; the
+ * title column takes up what is left, so dragging its border resizes the
+ * column next to it). Only the rows on screen are drawn. Delete and
+ * Shift+Delete ask, at the selected line, before anything is changed.
+ * See FORK.md.
  */
 import { Menu } from "obsidian";
 import React, {
@@ -13,21 +16,42 @@ import React, {
     useState,
 } from "react";
 
-import { COLUMNS, cellText, columnDef } from "utils/evo-library-model";
-import { Icon } from "ui/evo-library/parts";
+import {
+    COLUMNS,
+    cellText,
+    columnDef,
+    resizeColumns,
+    widthOf,
+} from "utils/evo-library-model";
+import { Icon, Title } from "ui/evo-library/parts";
 
 import type { ColumnId, EvoItemRow, SortSpec } from "utils/evo-library-model";
 
 /** Height of one row in pixels; `--zotflow-evo-row` in styles.css says the same. */
 const ROW_HEIGHT = 26;
 const OVERSCAN = 12;
-const MIN_COLUMN = 30;
 
-const KIND_ICON: Record<string, { icon: string; label: string }> = {
-    pdf: { icon: "file-text", label: "PDF" },
-    epub: { icon: "book-open", label: "EPUB" },
-    snapshot: { icon: "globe", label: "Web snapshot" },
+const KIND_ICON: Record<
+    string,
+    { icon: string; fallback?: string; label: string }
+> = {
+    pdf: { icon: "file-text", label: "Open PDF" },
+    epub: { icon: "book-open", label: "Open EPUB" },
+    snapshot: { icon: "globe", label: "Open web snapshot" },
+    linked: {
+        icon: "file-symlink",
+        fallback: "link",
+        label: "Linked file (outside Zotero's storage)",
+    },
 };
+
+/** A question asked at the selected line before an edit (Delete, Shift+Delete). */
+export interface RowPrompt {
+    /** The row it is shown at. */
+    key: string;
+    text: string;
+    confirmLabel: string;
+}
 
 export interface ItemTableProps {
     rows: EvoItemRow[];
@@ -37,9 +61,10 @@ export interface ItemTableProps {
     selected: ReadonlySet<string>;
     focusKey: string | null;
     emptyText: string;
+    prompt?: RowPrompt | null;
     onSort: (column: ColumnId) => void;
     onColumns: (columns: ColumnId[]) => void;
-    onWidth: (column: ColumnId, width: number) => void;
+    onWidths: (widths: Partial<Record<ColumnId, number>>) => void;
     onSelect: (
         row: EvoItemRow,
         event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
@@ -50,15 +75,19 @@ export interface ItemTableProps {
     onMenu: (row: EvoItemRow, event: React.MouseEvent) => void;
     onDragRows: (row: EvoItemRow, event: React.DragEvent) => void;
     onSearch: (row: EvoItemRow) => void;
-}
-
-function widthOf(column: ColumnId, widths: Record<string, number>): number {
-    return Math.max(MIN_COLUMN, widths[column] ?? columnDef(column).width);
+    /** Delete (`trash` false) or Shift+Delete (`trash` true) on the selection. */
+    onDeleteKey?: (trash: boolean) => void;
+    onPromptConfirm?: () => void;
+    onPromptCancel?: () => void;
+    /** The table's keyboard focus, for the view to give it back. */
+    bodyRef?: React.RefObject<HTMLDivElement>;
 }
 
 export function ItemTable(props: ItemTableProps) {
-    const { rows, columns, widths, sort, selected, focusKey } = props;
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const { rows, columns, widths, sort, selected, focusKey, prompt } = props;
+    const ownRef = useRef<HTMLDivElement>(null);
+    const scrollRef = props.bodyRef ?? ownRef;
+    const tableRef = useRef<HTMLDivElement>(null);
     const [view, setView] = useState({ top: 0, height: 600 });
 
     useLayoutEffect(() => {
@@ -74,19 +103,20 @@ export function ItemTable(props: ItemTableProps) {
             observer.disconnect();
             el.removeEventListener("scroll", update);
         };
-    }, []);
+    }, [scrollRef]);
 
-    // Keep the focused row in view when it moves (arrow keys, a new selection).
+    // Keep the focused row (or the question) in view when it moves.
+    const shownKey = prompt?.key ?? focusKey;
     useEffect(() => {
         const el = scrollRef.current;
-        if (!el || !focusKey) return;
-        const index = rows.findIndex((r) => r.key === focusKey);
+        if (!el || !shownKey) return;
+        const index = rows.findIndex((r) => r.key === shownKey);
         if (index < 0) return;
         const top = index * ROW_HEIGHT;
         if (top < el.scrollTop) el.scrollTop = top;
         else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight)
             el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
-    }, [focusKey, rows]);
+    }, [shownKey, rows, scrollRef]);
 
     const first = Math.max(0, Math.floor(view.top / ROW_HEIGHT) - OVERSCAN);
     const last = Math.min(
@@ -130,34 +160,56 @@ export function ItemTable(props: ItemTableProps) {
     );
 
     function startResize(column: ColumnId, event: React.PointerEvent) {
+        if (event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
         const handle = event.currentTarget as HTMLElement;
-        handle.setPointerCapture(event.pointerId);
+        const doc = handle.ownerDocument;
+        const table = tableRef.current;
         const startX = event.clientX;
-        const start = widthOf(column, widths);
-        const header = handle.closest<HTMLElement>(".zotflow-evo-table");
-        let width = start;
+        let change: Partial<Record<ColumnId, number>> = {};
+        handle.classList.add("is-dragging");
+        doc.body.classList.add("zotflow-evo-col-resizing");
+        // Listened for on the document: the pointer soon leaves the 6 px
+        // handle, and a captured pointer is not certain to stay captured.
         const move = (ev: PointerEvent) => {
-            width = Math.max(
-                MIN_COLUMN,
-                Math.round(start + ev.clientX - startX),
+            change = resizeColumns(
+                columns,
+                widths,
+                column,
+                ev.clientX - startX,
             );
-            header?.style.setProperty(
-                `--zotflow-evo-col-${column}`,
-                width + "px",
-            );
+            for (const [id, width] of Object.entries(change)) {
+                table?.style.setProperty(
+                    `--zotflow-evo-col-${id}`,
+                    width + "px",
+                );
+            }
         };
         const up = () => {
-            handle.removeEventListener("pointermove", move);
-            handle.removeEventListener("pointerup", up);
-            if (width !== start) props.onWidth(column, width);
+            doc.removeEventListener("pointermove", move, true);
+            doc.removeEventListener("pointerup", up, true);
+            doc.removeEventListener("pointercancel", up, true);
+            handle.classList.remove("is-dragging");
+            doc.body.classList.remove("zotflow-evo-col-resizing");
+            if (Object.keys(change).length) props.onWidths(change);
         };
-        handle.addEventListener("pointermove", move);
-        handle.addEventListener("pointerup", up);
+        doc.addEventListener("pointermove", move, true);
+        doc.addEventListener("pointerup", up, true);
+        doc.addEventListener("pointercancel", up, true);
     }
 
     function handleKeyDown(event: React.KeyboardEvent) {
+        if (prompt) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                props.onPromptConfirm?.();
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                props.onPromptCancel?.();
+            }
+            return;
+        }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             props.onMove(event.key === "ArrowDown" ? 1 : -1, event.shiftKey);
@@ -173,6 +225,13 @@ export function ItemTable(props: ItemTableProps) {
         ) {
             event.preventDefault();
             props.onSelectAll();
+        } else if (
+            (event.key === "Delete" || event.key === "Backspace") &&
+            props.onDeleteKey &&
+            selected.size > 0
+        ) {
+            event.preventDefault();
+            props.onDeleteKey(event.shiftKey);
         }
     }
 
@@ -182,19 +241,23 @@ export function ItemTable(props: ItemTableProps) {
         vars[`--zotflow-evo-col-${column}`] = widthOf(column, widths) + "px";
 
     function cell(row: EvoItemRow, column: ColumnId) {
+        if (column === "title") return <Title text={row.title} />;
         if (column === "attachment") {
-            if (row.attachment && KIND_ICON[row.attachment]) {
-                const kind = KIND_ICON[row.attachment]!;
+            const kind = row.attachment ? KIND_ICON[row.attachment] : undefined;
+            if (kind) {
                 return (
                     <span
-                        className="zotflow-evo-attachment"
-                        title={`Open ${kind.label}`}
+                        className={
+                            "zotflow-evo-attachment" +
+                            (row.attachment === "linked" ? " is-linked" : "")
+                        }
+                        title={kind.label}
                         onClick={(e) => {
                             e.stopPropagation();
                             props.onOpen(row);
                         }}
                     >
-                        <Icon name={kind.icon} />
+                        <Icon name={kind.icon} fallback={kind.fallback} />
                     </span>
                 );
             }
@@ -216,12 +279,18 @@ export function ItemTable(props: ItemTableProps) {
         return cellText(row, column);
     }
 
+    const promptIndex = prompt
+        ? rows.findIndex((r) => r.key === prompt.key)
+        : -1;
+
     return (
-        <div className="zotflow-evo-table" style={vars}>
+        <div className="zotflow-evo-table" style={vars} ref={tableRef}>
             <div className="zotflow-evo-thead" onContextMenu={columnMenu}>
-                {columns.map((column) => {
+                {columns.map((column, index) => {
                     const def = columnDef(column);
                     const sorted = sort.column === column;
+                    // The last column's right edge is the table's.
+                    const resizable = index < columns.length - 1;
                     return (
                         <div
                             key={column}
@@ -248,11 +317,15 @@ export function ItemTable(props: ItemTableProps) {
                                     className="zotflow-evo-th-sort"
                                 />
                             )}
-                            <span
-                                className="zotflow-evo-th-resize"
-                                onPointerDown={(e) => startResize(column, e)}
-                                onClick={(e) => e.stopPropagation()}
-                            />
+                            {resizable && (
+                                <span
+                                    className="zotflow-evo-th-resize"
+                                    onPointerDown={(e) =>
+                                        startResize(column, e)
+                                    }
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            )}
                         </div>
                     );
                 })}
@@ -300,6 +373,32 @@ export function ItemTable(props: ItemTableProps) {
                                 ))}
                             </div>
                         ))}
+                        {prompt && promptIndex >= 0 && (
+                            <div
+                                className="zotflow-evo-prompt"
+                                style={{ top: promptIndex * ROW_HEIGHT }}
+                                role="alertdialog"
+                                aria-label={prompt.text}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <span className="zotflow-evo-prompt-text">
+                                    {prompt.text}
+                                </span>
+                                <button
+                                    className="mod-warning"
+                                    onClick={() => props.onPromptConfirm?.()}
+                                >
+                                    {prompt.confirmLabel}
+                                    <kbd>⏎</kbd>
+                                </button>
+                                <button
+                                    onClick={() => props.onPromptCancel?.()}
+                                >
+                                    Cancel
+                                    <kbd>Esc</kbd>
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

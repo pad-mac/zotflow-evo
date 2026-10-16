@@ -13,9 +13,22 @@ import {
     showInZotero,
 } from "ui/evo-library/actions";
 
+import {
+    ANNOTATIONS_ICON,
+    ANNOTATIONS_ICON_FALLBACK,
+    iconOr,
+} from "ui/evo-library/parts";
+
 import type { App, WorkspaceLeaf } from "obsidian";
 import type { EvoItemRow } from "utils/evo-library-model";
 import type { EvoScope } from "worker/services/evo-library";
+
+/** Edits the item menu offers on the selection (the question comes at the row). */
+export interface ItemMenuEdits {
+    /** In a collection: take the selection out of it. */
+    onRemove?: () => void;
+    onTrash?: () => void;
+}
 
 /** Right-click on a row. */
 export function showItemMenu(
@@ -23,6 +36,7 @@ export function showItemMenu(
     leaf: WorkspaceLeaf,
     row: EvoItemRow,
     event: MouseEvent,
+    edits: ItemMenuEdits = {},
 ): void {
     const menu = new Menu();
     const regular = row.itemType !== "attachment" && row.itemType !== "note";
@@ -56,6 +70,26 @@ export function showItemMenu(
             .setIcon("external-link")
             .onClick(() => showInZotero(row.libraryID, row.key)),
     );
+    if (edits.onRemove || edits.onTrash) menu.addSeparator();
+    if (edits.onRemove) {
+        const onRemove = edits.onRemove;
+        menu.addItem((item) =>
+            item
+                .setTitle("Remove from collection…")
+                .setIcon("folder-minus")
+                .onClick(onRemove),
+        );
+    }
+    if (edits.onTrash) {
+        const onTrash = edits.onTrash;
+        menu.addItem((item) =>
+            item
+                .setTitle("Move to trash…")
+                .setIcon("trash-2")
+                .setWarning(true)
+                .onClick(onTrash),
+        );
+    }
     menu.showAtMouseEvent(event);
 }
 
@@ -67,9 +101,21 @@ export function showCollectionMenu(
     options: {
         subcollections: boolean;
         onSubcollections: (on: boolean) => void;
+        /** Whether it is pinned to the top; absent for a library. */
+        pinned?: boolean;
+        onPin?: (on: boolean) => void;
     },
 ): void {
     const menu = new Menu();
+    if (scope.collectionKey !== null && options.onPin) {
+        const { onPin, pinned } = options;
+        menu.addItem((item) =>
+            item
+                .setTitle(pinned ? "Unpin" : "Pin to the top")
+                .setIcon(pinned ? "pin-off" : "pin")
+                .onClick(() => onPin(!pinned)),
+        );
+    }
     if (scope.collectionKey !== null) {
         menu.addItem((item) =>
             item
@@ -81,7 +127,7 @@ export function showCollectionMenu(
     menu.addItem((item) =>
         item
             .setTitle("Show annotations")
-            .setIcon("highlighter")
+            .setIcon(iconOr(ANNOTATIONS_ICON, ANNOTATIONS_ICON_FALLBACK))
             .onClick(() => void openAnnotationsTab(app, scope)),
     );
     menu.addSeparator();
