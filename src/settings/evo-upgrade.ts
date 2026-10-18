@@ -7,6 +7,11 @@ import {
     PREVIOUS_DROP_LINK_TEMPLATES,
 } from "settings/types";
 
+import {
+    DEFAULT_ATTACH_FILENAME,
+    PREVIOUS_ATTACH_FILENAMES,
+} from "utils/evo-library-model";
+
 import type { ZotFlowSettings } from "settings/types";
 
 /**
@@ -17,5 +22,8 @@ import type { ZotFlowSettings } from "settings/types";
 export function upgradeEvoSettings(settings: ZotFlowSettings): void {
     if (PREVIOUS_DROP_LINK_TEMPLATES.includes(settings.evoDropLinkTemplate)) {
         settings.evoDropLinkTemplate = DEFAULT_DROP_LINK_TEMPLATE;
+    }
+    if (PREVIOUS_ATTACH_FILENAMES.includes(settings.evoAttachFilename)) {
+        settings.evoAttachFilename = DEFAULT_ATTACH_FILENAME;
     }
 }

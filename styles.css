@@ -3974,6 +3974,14 @@ body:not(.is-mobile)
     height: 12px;
 }
 
+.zotflow-evo-coll-rename {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 20px;
+    padding: 0 4px;
+    font-size: var(--font-ui-small);
+}
+
 .zotflow-evo-coll-name {
     min-width: 0;
     overflow: hidden;
@@ -4299,6 +4307,16 @@ body.zotflow-evo-col-resizing * {
     color: var(--text-normal);
 }
 
+/* A person's name opens their note; looks as before, coloured on hover
+   like the file links below. */
+.zotflow-evo-person {
+    cursor: pointer;
+}
+
+.zotflow-evo-person:hover {
+    color: var(--interactive-accent);
+}
+
 .zotflow-evo-details-year {
     margin-top: 1px;
     color: var(--text-muted);
@@ -4309,6 +4327,30 @@ body.zotflow-evo-col-resizing * {
     margin-top: 2px;
     color: var(--text-muted);
     font-style: italic;
+}
+
+/* The collections the item is in. */
+.zotflow-evo-details-colls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 10px;
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-details-colls-icon svg {
+    width: 13px;
+    height: 13px;
+}
+
+.zotflow-evo-details-coll {
+    cursor: pointer;
+}
+
+.zotflow-evo-details-coll:hover {
+    color: var(--interactive-accent);
 }
 
 .zotflow-evo-details-files {
@@ -4570,4 +4612,157 @@ body.zotflow-evo-col-resizing * {
     font-size: var(--font-ui-smaller);
     font-weight: normal;
     font-variant-numeric: tabular-nums;
+}
+
+/* ----- Full-text search ----- */
+
+.zotflow-evo-fts {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.zotflow-evo-fts-scopes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 4px;
+}
+
+.zotflow-evo-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 22px;
+    padding: 0 3px 0 9px;
+    border-radius: 11px;
+    background-color: var(--background-modifier-hover);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.zotflow-evo-chip-remove {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 50%;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+
+.zotflow-evo-chip-remove:hover {
+    color: var(--text-normal);
+}
+
+.zotflow-evo-chip-remove svg {
+    width: 12px;
+    height: 12px;
+}
+
+.zotflow-evo-filter.zotflow-evo-fts-input {
+    max-width: none;
+    margin-inline-start: 0;
+}
+
+.zotflow-evo-fts-status {
+    padding: 4px 12px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-fts-status.is-error {
+    color: var(--text-error);
+}
+
+.zotflow-evo-fts-snippet {
+    margin: 0 4px 6px 0;
+    padding: 4px 8px 4px 12px;
+    border-radius: var(--radius-s);
+    cursor: pointer;
+}
+
+.zotflow-evo-fts-snippet:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-evo-fts-label {
+    display: flex;
+    gap: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 18px;
+}
+
+.zotflow-evo-fts-label-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Five lines, the match in the middle (FulltextSearch.tsx scrolls it
+   there); the lines before and after fade out where there is more. */
+.zotflow-evo-fts-text {
+    --zotflow-evo-fade-top: #000;
+    --zotflow-evo-fade-bottom: #000;
+    max-height: calc(5 * 20px);
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        var(--zotflow-evo-fade-top) 0,
+        #000 20px,
+        #000 calc(100% - 20px),
+        var(--zotflow-evo-fade-bottom) 100%
+    );
+    mask-image: linear-gradient(
+        to bottom,
+        var(--zotflow-evo-fade-top) 0,
+        #000 20px,
+        #000 calc(100% - 20px),
+        var(--zotflow-evo-fade-bottom) 100%
+    );
+}
+
+.zotflow-evo-fts-text.is-cut-top {
+    --zotflow-evo-fade-top: transparent;
+}
+
+.zotflow-evo-fts-text.is-cut-bottom {
+    --zotflow-evo-fade-bottom: transparent;
+}
+
+.zotflow-evo-fts-snippet.is-notext .zotflow-evo-fts-text {
+    color: var(--text-faint);
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.zotflow-evo-fts-hit {
+    padding: 0 2px;
+    border-radius: 3px;
+    background-color: rgba(128, 128, 128, 0.28);
+    color: inherit;
+}
+
+.zotflow-evo-fts-page {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--text-faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-fts-more {
+    padding: 0 12px 8px;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+}
+
+.zotflow-evo-fts-more:hover {
+    color: var(--text-normal);
 }

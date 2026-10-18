@@ -180,6 +180,7 @@ describe("EvoLibraryService", () => {
         await book("BOOK0001");
         expect(await service.itemBanner(USER_ID, "BOOK0001")).toEqual({
             authors: "Henning Schmidgen, Bernhard Siegert, Ana Ofak",
+            authorList: ["Henning Schmidgen", "Bernhard Siegert", "Ana Ofak"],
             year: "2005",
             title: "Book BOOK0001",
         });
@@ -259,12 +260,39 @@ describe("EvoLibraryService edits", () => {
     });
 
     test("the name of a saved file: the template over those parts, made safe", async () => {
-        await book("BOOK0001", {}, { shortTitle: "Lebendige Kräfte: <i>Helmholtz</i>" });
-        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("schmidgen_2005_lebendige_kräfte_helmholtz");
+        await book("BOOK0001", {}, { shortTitle: "Lebendige  Kräfte: <i>Helmholtz</i> und die Nerven" });
+        expect(await service.attachFilename(USER_ID, "BOOK0001")).toEqual({ name: "schmidgen_2005_lebendige-kräfte" });
         service.updateSettings({ ...h.settings, evoAttachFilename: "{{ year }} {{ lastName }}" });
-        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("2005 Schmidgen");
+        expect(await service.attachFilename(USER_ID, "BOOK0001")).toEqual({ name: "2005 Schmidgen" });
         service.updateSettings({ ...h.settings, evoAttachFilename: "{% if %}" });
-        expect(await service.attachFilename(USER_ID, "BOOK0001")).toBe("schmidgen_2005_lebendige_kräfte_helmholtz");
-        expect(await service.attachFilename(USER_ID, "MISSING1")).toBe("");
+        const failed = await service.attachFilename(USER_ID, "BOOK0001");
+        expect(failed.name).toBe("schmidgen_2005_lebendige-kräfte");
+        expect(failed.problem).toMatch(/failed/);
+        service.updateSettings({ ...h.settings, evoAttachFilename: "{{ nothing }}" });
+        expect((await service.attachFilename(USER_ID, "BOOK0001")).problem).toMatch(/gave nothing/);
+        expect(await service.attachFilename(USER_ID, "MISSING1")).toEqual({ name: "" });
+        await book("BOOK0002", {}, { shortTitle: "Grammophon" });
+        service.updateSettings({ ...h.settings, evoAttachFilename: "" });
+        expect((await service.attachFilename(USER_ID, "BOOK0002")).name).toBe("schmidgen_2005_grammophon");
+    });
+
+    test("collections renamed or moved in Zotero show here at once", async () => {
+        await seedCollection({ libraryID: USER_ID, key: "TOP00001", name: "Top" });
+        const before = await service.collectionInfo(USER_ID, "TOP00001");
+        expect(before?.name).toBe("Top");
+        await service.collectionWritten(USER_ID, "TOP00001", { name: "Renamed", parentCollection: "PARENT01" }, 42);
+        const after = await service.collectionInfo(USER_ID, "TOP00001");
+        expect(after).toEqual({ version: 42, name: "Renamed", parentCollection: "PARENT01" });
+        await service.collectionWritten(USER_ID, "TOP00001", { parentCollection: false }, 43);
+        expect((await service.collectionInfo(USER_ID, "TOP00001"))?.parentCollection).toBe("");
+    });
+
+    test("the item pane names the item's collections", async () => {
+        await book("BOOK0001", {}, { collections: ["SUB00001", "TOP00001", "GONE0001"] });
+        const details = await service.itemDetails(USER_ID, "BOOK0001");
+        expect(details?.collections).toEqual([
+            { key: "SUB00001", name: "Kittler" },
+            { key: "TOP00001", name: "Media" },
+        ]);
     });
 });

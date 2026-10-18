@@ -156,6 +156,32 @@ export class EvoSection {
                         },
                     },
                     {
+                        name: "Zotero's data folder",
+                        desc: "For the full-text search, which reads copies of Zotero's own index (fulltext.sqlite, zotero.sqlite) and the text Zotero extracted (storage/…/.zotero-ft-cache). Empty: ~/Zotero. Desktop only.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder("~/Zotero")
+                                    .setValue(
+                                        this.plugin.settings.evoZoteroDataDir,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoZoteroDataDir =
+                                            value.trim();
+                                        await this.plugin.saveSettings();
+                                    });
+                                text.inputEl.addClass("zotflow-evo-wide-input");
+                            });
+                        },
+                    },
+                    {
+                        name: "Indent sub-collections",
+                        desc: "In the library browser's left pane. Off: every level starts at the same place; the arrows still show what is inside what.",
+                        control: {
+                            type: "toggle",
+                            key: "evoCollectionIndent",
+                        },
+                    },
+                    {
                         name: "Anna's Archive key",
                         desc: "Your member key (Account page). With it, the paperclip button of a web viewer pane gets the file of the book open there through the member API; without it, ZotFlow takes the file from the page (open the fast download or Anna's viewer first). Kept in Obsidian's secret storage, not in the plugin's settings file.",
                         render: (setting) => {

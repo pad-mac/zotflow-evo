@@ -27,6 +27,28 @@ export const LIBRARY_VIEW_TYPE = "zotflow-evo-library";
 export const COLLECTION_VIEW_TYPE = "zotflow-evo-collection";
 export const ANNOTATIONS_VIEW_TYPE = "zotflow-evo-annotations";
 export const DETAILS_VIEW_TYPE = "zotflow-evo-details";
+export const FULLTEXT_VIEW_TYPE = "zotflow-evo-fulltext";
+
+/** Open the full-text search in a tab, searching in `scopes` (a library: collectionKey null). */
+export async function openFulltextSearch(
+    app: App,
+    scopes: { libraryID: number; collectionKey: string | null }[],
+): Promise<void> {
+    if (!Platform.isDesktopApp) {
+        services.notificationService.notify(
+            "info",
+            "Full-text search needs the desktop app (it reads Zotero's own index).",
+        );
+        return;
+    }
+    const leaf = app.workspace.getLeaf("tab");
+    await leaf.setViewState({
+        type: FULLTEXT_VIEW_TYPE,
+        active: true,
+        state: { scopes, query: "" },
+    });
+    await app.workspace.revealLeaf(leaf);
+}
 
 function inSidebar(app: App, leaf: WorkspaceLeaf): boolean {
     const root = leaf.getRoot();
@@ -50,6 +72,27 @@ export async function openLibraryBrowser(app: App): Promise<WorkspaceLeaf> {
     await leaf.setViewState({ type: LIBRARY_VIEW_TYPE, active: true });
     await workspace.revealLeaf(leaf);
     return leaf;
+}
+
+/**
+ * Show an item in the library browser: in a collection (null: the whole
+ * library), selected.
+ */
+export async function revealInLibrary(
+    app: App,
+    libraryID: number,
+    collectionKey: string | null,
+    itemKey: string,
+): Promise<void> {
+    const leaf = await openLibraryBrowser(app);
+    const view = leaf.view as unknown as {
+        reveal?: (
+            libraryID: number,
+            collectionKey: string | null,
+            itemKey: string,
+        ) => void;
+    };
+    view.reveal?.(libraryID, collectionKey, itemKey);
 }
 
 /** Open one collection in a tab of its own: its name and its items. */
@@ -219,8 +262,8 @@ export async function openBookSearch(
         active: true,
         state: { url, navigate: true },
     });
-    if (!alive) setPaneWidth(leaf, SEARCH_PANE_WIDTH);
     await app.workspace.revealLeaf(leaf);
+    if (!alive) setPaneWidth(leaf, SEARCH_PANE_WIDTH);
 }
 
 /** How wide the web viewer opens beside the browser, in pixels. */
@@ -238,36 +281,70 @@ interface SizedItem {
 /**
  * Make a pane `px` wide: its tab group gets that share of the split it is
  * in, the others the rest in their proportions. Obsidian keeps the shares
- * (`dimension`) as weights; without `setDimension` (another Obsidian) the
- * weights go on the elements directly.
+ * (`dimension`) as flex weights; without `setDimension` (another Obsidian)
+ * the weights go on the elements directly. Measured once the new pane is
+ * laid out (right after the split it still has no width).
  */
-export function setPaneWidth(leaf: WorkspaceLeaf, px: number): void {
-    try {
-        const tabs = (leaf as unknown as SizedItem).parent;
-        const split = tabs?.parent;
-        const total = split?.containerEl?.getBoundingClientRect().width ?? 0;
-        if (!tabs || !split?.children || total < px + 200) return;
-        const share = (px / total) * 100;
-        const others = split.children.filter((c) => c !== tabs);
-        const weights = others.map((c) => c.dimension || 1);
-        const sum = weights.reduce((a, b) => a + b, 0) || 1;
-        const assign = (item: SizedItem, value: number) => {
-            if (typeof item.setDimension === "function")
-                item.setDimension(value);
-            else if (item.containerEl)
-                item.containerEl.style.flexGrow = String(value);
-        };
-        others.forEach((c, i) =>
-            assign(c, ((weights[i] ?? 1) / sum) * (100 - share)),
-        );
-        assign(tabs, share);
-    } catch (e) {
-        services.logService.warn(
-            "Could not size the web viewer pane",
-            "EvoLibrary",
-            e,
-        );
-    }
+export function setPaneWidth(
+    leaf: WorkspaceLeaf,
+    px: number,
+    tries = 12,
+): void {
+    const attempt = () => {
+        try {
+            const tabs = (leaf as unknown as SizedItem).parent;
+            const split = tabs?.parent;
+            const total =
+                split?.containerEl?.getBoundingClientRect().width ?? 0;
+            if (!tabs || !split?.children) return;
+            if (total < px + 200) {
+                // Not laid out yet, or too narrow to give that much.
+                if (total === 0 && tries > 0)
+                    window.setTimeout(
+                        () => setPaneWidth(leaf, px, tries - 1),
+                        50,
+                    );
+                return;
+            }
+            const share = (px / total) * 100;
+            const others = split.children.filter((c) => c !== tabs);
+            const weights = others.map((c) => c.dimension || 1);
+            const sum = weights.reduce((a, b) => a + b, 0) || 1;
+            const assign = (item: SizedItem, value: number) => {
+                if (typeof item.setDimension === "function")
+                    item.setDimension(value);
+                else if (item.containerEl)
+                    item.containerEl.style.flexGrow = String(value);
+            };
+            others.forEach((c, i) =>
+                assign(c, ((weights[i] ?? 1) / sum) * (100 - share)),
+            );
+            assign(tabs, share);
+            leaf.view?.app?.workspace.requestSaveLayout();
+            // If this Obsidian's setDimension() does not size the element,
+            // set the weights on the elements as well.
+            window.requestAnimationFrame(() => {
+                const width =
+                    tabs.containerEl?.getBoundingClientRect().width ?? px;
+                if (Math.abs(width - px) < 40) return;
+                others.forEach((c, i) => {
+                    if (c.containerEl)
+                        c.containerEl.style.flexGrow = String(
+                            ((weights[i] ?? 1) / sum) * (100 - share),
+                        );
+                });
+                if (tabs.containerEl)
+                    tabs.containerEl.style.flexGrow = String(share);
+            });
+        } catch (e) {
+            services.logService.warn(
+                "Could not size the web viewer pane",
+                "EvoLibrary",
+                e,
+            );
+        }
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(attempt));
 }
 
 /* ------------------------------------------------------------------ */

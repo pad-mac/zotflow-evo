@@ -60,9 +60,15 @@ Keep this list complete. One entry per change, newest last.
 | Commands "Filter the Zotero table" (Ctrl/Cmd+F, only in a library or collection tab: the cursor goes to the filter field) and "Search My Library" (Ctrl/Cmd+Alt+F: opens the library browser on the first library, cursor in the filter field). Arrow down or Enter in the filter goes to the table | `src/ui/evo-workspace.ts`; `BrowserControl` in `LibraryBrowser.tsx`, `focusFilter()` / `goTo()` of the views | Requested, with these defaults; they can be changed under Hotkeys. Obsidian's own Ctrl/Cmd+F needs an editor, so it does not compete in these tabs (the first command's check passes only there). Default hotkeys are discouraged by Obsidian's guidelines; lint warns. |
 | Save a file from the web viewer to the selected item, in Zotero's storage: a paperclip button in every web viewer pane's header (a menu names the target: the item focused last in a library tab, else the one a search was opened for), "Save link to …" in Obsidian's link menu where the web viewer offers it, and a command. The file is got, in this order: with an Anna's Archive key (setting, kept in secret storage), the member API (`/dyn/api/fast_download.json?md5=…&key=…`) for the MD5 in the address; the PDF Anna's viewer has loaded (pdf.js `getData()` in the page); the address itself or a file address in it; inside the page with its login. It is uploaded with Zotero's file upload protocol (attachment item, authorisation, upload, register) and a sync brings it here. Its name: the template `evoAttachFilename` (default `lastname_year_shorttitle`, lower case) over `lastName`, `year`, `shortTitle` (else the title), made safe for file systems. The search pane opens 640 px wide | `src/ui/evo-library/attach-file.ts` (new); `sniffFile()`, `md5FromUrl()`, `embeddedUrls()`, `sanitizeFilename()` in `evo-library-model.ts`; `attachFilename()` in the worker service; `setPaneWidth()` and `noteSearchTarget()` in `actions.ts`; key `evoAnnasKey` in `src/utils/credentials.ts`; settings in `evo-section.ts`; `registerAttachFromWebViewer()` in `src/main.ts` | Requested: both ways (with and without the key) are in, to see which works and drop the other. Only libraries on Zotero's storage (groups, or the personal library without WebDAV) whose key may write. The web viewer is reached through its `<webview>` element (`executeJavaScript`, `getURL`), its header through `addAction`, the pane width through `setDimension` of the tab group (else `flex-grow`): none of it is public API. Only PDF, EPUB and DjVu files are accepted (by their first bytes). |
 | The reader view's header is hidden while the note strip is shown (PDF, snapshot); its buttons appear, smaller, in the strip's head | `applyHeader()`, `headerActions()`, `listenForActions()` in `src/ui/reader/chrome.ts`; type `NoteStripAction`, field `actions` of `ReaderNoteStrip` and the `noteStripAction` event in `src/types/zotero-reader.d.ts` | Requested. The buttons are read from the header itself (any button, also ones other code adds; their icons as Obsidian drew them) and a click in the strip clicks the real one, at the place clicked (menus open there). Hiding the strip from there brings the header back. On a phone the header stays. |
+| Full-text search (beta.8): a tab (button in the library browser's and collection tabs' toolbars, command "Search the full text of Zotero documents") that searches the text of the documents in chosen libraries and collections (the one it was opened from preselected; more added from a searchable list, removed by their ×; sub-collections switch), with "match case" and "whole words". Results are snippets (five lines, the match in grey in the middle, the lines around fading), grouped by item, tag or not at all and ordered by relevance, title, date added or year, either way; outside item grouping each snippet is labelled "Lastname - year - shorttitle". A click opens the document with the reader's find bar set to the query (on its page when the text has page breaks). Settings `evoZoteroDataDir`, `evoFulltextLayout`, `evoFulltextMatchCase`, `evoFulltextWholeWords` | `src/ui/evo-library/FulltextSearch.tsx`, `fulltext-engine.ts`, `EvoFulltextView` in `views.tsx`, `openFulltextSearch()` in `actions.ts`; `src/fulltext/worker.ts` (its own worker); `src/utils/evo-fulltext.ts` (the rules, tested); the `fulltextWorkerPlugin` in `esbuild.config.mjs`; dependency `@sqlite.org/sqlite-wasm` (exact version); `personalLibraryID()` in `src/services/library-cache.ts`; `shortTitle`/`firstLastName` on the table rows (worker) | Requested. See "Full-text search" below for how it reads Zotero's files. Desktop only. |
+| Library browser, beta.8: collections renamed (right-click → Rename…, a field in place; Enter, Escape) and moved by dragging: onto the middle of a collection into it, onto the upper or lower edge of one beside it (at that level, at that place), onto a library to its top level; not into itself or another library | `src/ui/evo-library/collection-edits.ts` (new), `CollectionPane.tsx`; `collectionInfo()` and `collectionWritten()` in the worker service; `collectionParents()`, `isInside()` in `evo-library-model.ts` | Requested. ZotFlow's sync only downloads collections, so these edits are sent to Zotero's web API (PATCH with `If-Unmodified-Since-Version`), written into the local row at once, and a quiet sync follows; a 412 (changed elsewhere) starts a sync and asks to try again. |
+| Library browser, beta.8: first-level collections start where their library does, sub-levels one step in; setting `evoCollectionIndent` (off: no indenting). A sort button in the toolbars (any column, also hidden ones, either way). In the item pane: each author's name opens their note (`openLinkText`, as `[[Name]]` would; Ctrl/Cmd: new tab), and the item's collections are listed (library icon) under the publication — a click shows the collection with the item selected. The annotation browser orders items either way (`descending` in `evoAnnotationLayout`) | `CollectionPane.tsx`, `showSortMenu()` in `menus.ts`, `setSort()`/`selectKey()` in `useItems.ts`, `PersonLink` and the collections in `ItemDetails.tsx` (item `collections` from `itemDetails()`), `reveal()` of the browser (`BrowserControl`, `revealInLibrary()` in `actions.ts`), `groupAnnotations()` | Requested. |
+| Saving files from the web viewer, beta.8: the web viewer pane is sized after it is laid out (it had no width yet when beta.7 tried); a file name template that fails or renders nothing says so (the default is used); new default `lastname_year_two-words`, stored old default replaced (`PREVIOUS_ATTACH_FILENAMES`, `evo-upgrade.ts`). New: "New item from this page's ISBN, in …": the ISBNs on the page (valid check digit, whole words), looked up at Open Library, else Google Books, a book item created in the library or collection shown last in a library tab, the page's file saved to it | `setPaneWidth()` in `actions.ts`; `attachFilenameFor()` in the worker service; `src/utils/evo-isbn.ts` (new, tested); `saveAsNewItem()`, `lookupIsbn()`, `createBookItem()` in `attach-file.ts`; `publishScope()`/`lastScope()` in `selection.ts` | Requested. The ISBN lookup calls Open Library and Google Books: unlike the rest of ZotFlow (AGENTS.md: network only for Zotero and WebDAV), and only when this menu entry is used. The file is got before the item is created, so a failed download creates nothing. |
+| Reader, beta.8: the strip's button row shows only the fork's three toggles (not Obsidian's own buttons — more options, bookmark — nor "Open source note"); a right-click on the strip's title gives a menu with "Open source note" and "Open in library"; the authors' names open their notes; the page filter (below) is kept for every reader (`readerPdfFilter`) | `showTitleMenu()` and the `data-zf-evo-chrome` mark in `src/ui/reader/chrome.ts`; `authorList` of the banner (`itemBanner()`); `pdfFilter` in `ReaderNoteStrip` | Requested. |
+| Opening a document at a search: a navigation with `evoFind` (`{ query, caseSensitive, entireWord }`) opens the reader's find bar with it, also when the document was closed | `finishPendingNavigation()` in `src/ui/reader/view.ts`; the reader's adapter (below) | For the full-text search. |
 | Quiet syncs: an optional `quiet` flag from `startSync()` down to `SyncService.startSync()` suppresses the "Sync completed successfully!" notice | `src/ui/start-sync.ts`, `src/bridge/index.ts`, `src/worker/worker.ts`, `src/worker/tasks/manager.ts`, `src/worker/tasks/impl/sync-task.ts`, `src/worker/services/sync.ts` (one parameter each) | Automatic syncs run often; only their failures are reported. |
 
-Known limits and open checks of these (as of 1.7.1-beta.7):
+Known limits and open checks of these (as of 1.7.1-beta.8):
 
 - Automatic sync was written against Zotero's own streaming client and is
   covered by unit tests with a fake stream; it had not yet been run against
@@ -96,6 +102,18 @@ Known limits and open checks of these (as of 1.7.1-beta.7):
   here; the route that worked is named in the notice.
 - Ctrl/Cmd+Alt+F on macOS is also Obsidian's "search and replace" in an
   editor; which of the two runs there is up to Obsidian.
+- Full-text search was checked against copies of a real `fulltext.sqlite`
+  and `zotero.sqlite` (Zotero 7.1/8) in Chromium, the view in the browser
+  rig. Not checked here: the form of `.zotero-ft-cache` (whether pages are
+  separated by form feeds, which gives the snippets their page), and the
+  worker inside Obsidian. Without whole words a query also finds words
+  that start with it, not words that contain it elsewhere (the index knows
+  word starts only). Whatever Zotero still keeps in `zotero.sqlite-wal` is
+  not in the copy until Zotero writes it into the database (items added
+  minutes ago may be missing from the mapping).
+- Renaming and moving collections, and the new item from an ISBN, were
+  checked against stand-ins for Zotero's API, Open Library and Google
+  Books.
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
@@ -112,6 +130,9 @@ only call into them; every such line is marked `ZotFlow Evo`.
 | Icon of a note on the page's right edge is not drawn while the strip is open | `isNoteShownInStrip()` in `obsidian-evo.js`; three lines in `_pushNote()` of `src/pdf/page.js` | A note written in the strip is stored as a Zotero note annotation against the right-hand edge of its page; the strip shows it. With the strip closed the icon is drawn as usual. |
 | A refresh of the annotations from the plugin leaves alone what was written in the reader a moment ago | `noteLocalAnnotationWrites()` / `annotationsNewerHere()` in `obsidian-evo.js`; hooks in `onSaveAnnotations`, `onDeleteAnnotations` and `refreshAnnotations()` of `src/index.obsidian.reader.js` | The plugin refreshes the reader from its database after every sync. With automatic sync that can land while a comment is being typed, and the database copy read a moment earlier would take back the last words (or bring back a deleted annotation, or drop a new one). Protected: annotations still waiting to be saved, and for 4 s after they were handed over. |
 | A note made in a snapshot gets the sort index of its own paragraph | Six lines in `getAnnotationFromRange()` of `src/dom/snapshot/snapshot-view.ts` | Upstream counts a note's sort index to the start of the *parent* of the paragraph it stands on (the range it is given starts there), plus the paragraph's number among its siblings. In any list by sort index, the strip and Zotero's own sidebar alike, the note then stands at the top of its article instead of at its paragraph. Notes stored that way earlier are not rewritten; the strip orders them by their paragraph (`withPlaces()` in `strip-host-dom.js`). |
+| Note strip, beta.8: the head's buttons fade (out 140 ms, in 90 ms); no + button; a page filter button (PDF) opens sliders under the buttons — white threshold, contrast, saturation — which close when the pointer leaves the strip; a right-click on the title asks the plugin for its menu, a click on an author's name for their note (`noteStripAction` ids `title-menu`, `person:<name>`) | `StripHead`, `FilterPanel`, `HeadBanner`/`Byline` (`authorList`) in `note-strip.js`; the `hover` event of `strip-host.js`; styles in `_evo.scss` | Requested. |
+| Colour filter over PDF pages, KOReader-like: saturation (an `feColorMatrix`), then one tone curve (an `feComponentTransfer` table): a white point (`whiteThreshold`: everything that close to white becomes white) and a gamma (`contrast`: above 1 text darker, white and black stay). On each page's canvas only (text layer, annotations untouched), also with the strip hidden | `applyPdfFilterTo()`, `applyPdfFilter()`, `pdfToneTable()` in `obsidian-evo.js`; called from `applyNoteStrip()` and an effect in `EvoNoteStrip` (views drawn again) | Requested ("white threshold, contrast and saturation"). Brightness is left out: a white point lifts the light greys of a scan without moving black, which is what makes faint scans readable. |
+| Opening at a search: `navigate()` of the reader's adapter takes `evoFind` and opens the find bar with it (`startFind()`), after going to the place given with it | `navigate()` in `src/index.obsidian.reader.js`; `startFind()` in `obsidian-evo.js` | For the plugin's full-text search. |
 | Note strip, beta.7: the head's buttons and colour filters show only while the pointer is over the strip (head or comments; a short linger covers the crossing); hidden they keep their room. The Obsidian view's header buttons stand first in that row (`actions`), then highlights and +; the filters move to a second line when the strip is narrow. New highlights icon (Lucide's highlighter: struck through when off, inked and accented when on); + is Lucide's plus | `_trackHover()` and `toTopPoint()` in `strip-host.js`; `StripHead`, `ViewAction`, `IconHighlights` in `note-strip.js`; `reportNoteStripAction()` in `obsidian-evo.js` (event `noteStripAction` with the click's place in the reader's document); styles in `_evo.scss` | Requested. The hover class is on the body of both documents (the root's classes are the reader document's). |
 | Note strip, beta.7: anchored, with no comment in view, a small arrow at the top and/or the bottom with the page of the nearest comment that way | `arrowTargets()` in `strip-layout.mjs` (tested); `setArrows()` and the arrows' styles in `strip-host-pdf.js`; an effect in `Strip` | Requested. The arrows are in the PDF view's document, over the strip, and take no clicks (that document is the PDF view's). |
 | Note strip, beta.7: a list whose comments are all folded away no longer says "No comments yet"; the head's title draws `<i>` in italics | `any` of the model in `Strip`; `titleRuns()` in `strip-layout.mjs` | Fixes. |
@@ -119,6 +140,37 @@ only call into them; every such line is marked `ZotFlow Evo`.
 Known limits of these: with the toolbar hidden, Tab still cycles through
 the hidden toolbar's focus groups (`focus-manager.js` is untouched), and the
 appearance and read-aloud popups keep their 41px offset.
+
+### Full-text search
+
+- **Whose index.** Zotero 7.1 and later keep their full-text index in
+  `fulltext.sqlite` in the data folder: SQLite FTS5 tables without the
+  text itself (`content=''`), the row id being Zotero's local item id. The
+  text Zotero extracted is in `storage/<attachment key>/.zotero-ft-cache`.
+  ZotFlow uses both and indexes nothing itself.
+- **Never touching Zotero's files.** The plugin reads the bytes of
+  `fulltext.sqlite` and `zotero.sqlite` (Node `fs`, desktop only) and hands
+  them to a worker of its own, which opens them as in-memory, read-only
+  databases (`sqlite3_deserialize`). `zotero.sqlite` is in WAL mode;
+  only in the copy are bytes 18–19 of the header set to rollback mode so it
+  opens. Copies are taken again when either file (or the -wal) changed,
+  checked before each search. `zotero.sqlite` is read once per copy for
+  the attachments (local id → key, parent key, library) and closed.
+- **Only while used.** The worker (with SQLite's WebAssembly build, from
+  `@sqlite.org/sqlite-wasm`, which has FTS5; sql.js has not) is bundled
+  gzipped and started when a search view opens; it stops a minute after the
+  last one closed, and with the plugin. Nothing runs otherwise.
+- **Searching.** The query's words as one FTS5 phrase (a prefix on the last
+  word unless "whole words") finds the documents, best first (`rank`), in
+  the content table and the CJK table. They are kept to the items of the
+  chosen collections (read from ZotFlow's database), at most 1000. Then
+  each document's text is read and checked, six at a time: case and
+  whole words as asked, accents ignored unless "match case" (as the index
+  does). Documents without a match are dropped; ones whose text is not on
+  this computer are listed as such.
+- **Libraries.** Zotero's local library 1 is ZotFlow's personal library;
+  groups are matched by group id. Items of libraries ZotFlow does not sync
+  are not listed (they are not in any chosen collection).
 
 ### How the note strip works
 
@@ -167,9 +219,11 @@ appearance and read-aloud popups keep their 41px offset.
   at the right end in tabular figures, the authors fading out before it
   when they do not fit; then the full title, bold, same size and colour
   (`<i>` in italics). Under them a row of buttons — the reader view's
-  header buttons while that header is hidden, then highlights and + — and
-  the colour filters (on a second line when narrow). The row shows only
-  while the pointer is over the strip; hidden, it keeps its room.
+  header toggles while that header is hidden, then highlights and (PDF)
+  the page filter — and the colour filters (on a second line when
+  narrow). The row fades in only while the pointer is over the strip;
+  hidden, it keeps its room. A right-click on the title gives the
+  plugin's menu (source note, open in library); authors open their notes.
 - **Arrows (anchored).** With no comment in view, a small arrow at the top
   and/or bottom names the page of the nearest comment that way. They are
   drawn in the PDF view's document over the strip and take no clicks.
@@ -200,8 +254,9 @@ appearance and read-aloud popups keep their 41px offset.
   The width is kept for every reader (`noteStripChanged`).
 - **Where a new note goes (list).** A click on empty space puts it after
   the entry above the click (under a highlight, between two entries, below
-  the last one). The + button puts it after the last thing listed on the
-  page being read — beside a snapshot: on screen. Only with nothing there
+  the last one). With nothing above the click (an empty list) it goes
+  after the last thing listed on the page being read — beside a snapshot:
+  on screen (until beta.7 also the + button). Only with nothing there
   does it get a place of its own: the start of the page (sort index
   `page|000000|n`, `pageStartSlot()`), or the paragraph in the middle of
   the screen. "After an entry" is a sort index (`sortIndexAfter()`): the

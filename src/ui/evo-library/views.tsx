@@ -12,8 +12,11 @@ import {
     ANNOTATIONS_VIEW_TYPE,
     COLLECTION_VIEW_TYPE,
     DETAILS_VIEW_TYPE,
+    FULLTEXT_VIEW_TYPE,
     LIBRARY_VIEW_TYPE,
 } from "ui/evo-library/actions";
+import { FulltextSearch } from "ui/evo-library/FulltextSearch";
+import { fulltextEngine } from "ui/evo-library/fulltext-engine";
 import { AnnotationBrowser } from "ui/evo-library/AnnotationBrowser";
 import { CollectionTab } from "ui/evo-library/CollectionTab";
 import { DetailsTab } from "ui/evo-library/ItemDetails";
@@ -26,6 +29,7 @@ import {
 
 import type { Plugin, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type { Root } from "react-dom/client";
+import type { FulltextScope } from "ui/evo-library/FulltextSearch";
 import type {
     BrowserControl,
     BrowserTarget,
@@ -68,6 +72,36 @@ export class EvoLibraryView extends ItemView implements FilterableView {
 
     focusFilter() {
         this.control.current?.focusFilter();
+    }
+
+    /** The library or collection shown (the full-text search starts there). */
+    currentTarget(): BrowserTarget | null {
+        return this.evoTarget;
+    }
+
+    /** Show a collection (null: the library) with an item selected. */
+    reveal(
+        libraryID: number,
+        collectionKey: string | null,
+        itemKey: string,
+        tries = 40,
+    ) {
+        // A tab opened just now draws its browser a moment later.
+        if (!this.control.current) {
+            if (tries > 0)
+                window.setTimeout(
+                    () =>
+                        this.reveal(
+                            libraryID,
+                            collectionKey,
+                            itemKey,
+                            tries - 1,
+                        ),
+                    50,
+                );
+            return;
+        }
+        this.control.current.reveal(libraryID, collectionKey, itemKey);
     }
 
     /** Show a library or collection (null: My Library). */
@@ -183,6 +217,16 @@ abstract class ScopeView extends ItemView {
 
 /** One collection in a tab of its own. */
 export class EvoCollectionView extends ScopeView implements FilterableView {
+    /** The collection shown. */
+    currentTarget(): BrowserTarget | null {
+        return this.evoScope
+            ? {
+                  libraryID: this.evoScope.libraryID,
+                  collectionKey: this.evoScope.collectionKey,
+              }
+            : null;
+    }
+
     private control: { current: { focusFilter(): void } | null } = {
         current: null,
     };
@@ -278,6 +322,86 @@ export class EvoDetailsView extends ItemView {
     }
 }
 
+/** Full-text search over chosen collections. */
+export class EvoFulltextView extends ItemView {
+    private root: Root | null = null;
+    private evoScopes: FulltextScope[] = [];
+    private evoQuery = "";
+    /** Bumped when the state comes from outside: the search starts over. */
+    private generation = 0;
+
+    getViewType() {
+        return FULLTEXT_VIEW_TYPE;
+    }
+
+    getDisplayText() {
+        return this.evoQuery ? `Search: ${this.evoQuery}` : "Full-text search";
+    }
+
+    getIcon() {
+        return "text-search";
+    }
+
+    getState(): Record<string, unknown> {
+        return {
+            ...super.getState(),
+            scopes: this.evoScopes,
+            query: this.evoQuery,
+        };
+    }
+
+    async setState(state: unknown, result: ViewStateResult): Promise<void> {
+        const s = state as { scopes?: unknown; query?: unknown } | undefined;
+        if (Array.isArray(s?.scopes)) {
+            this.evoScopes = s.scopes.filter(
+                (x): x is FulltextScope =>
+                    !!x &&
+                    typeof (x as FulltextScope).libraryID === "number" &&
+                    ((x as FulltextScope).collectionKey === null ||
+                        typeof (x as FulltextScope).collectionKey === "string"),
+            );
+        }
+        if (typeof s?.query === "string") this.evoQuery = s.query;
+        await super.setState(state, result);
+        this.generation++;
+        this.render();
+    }
+
+    private onState = (state: { scopes: FulltextScope[]; query: string }) => {
+        const titleChanged = state.query !== this.evoQuery;
+        this.evoScopes = state.scopes;
+        this.evoQuery = state.query;
+        if (titleChanged) refreshHeader(this.leaf);
+        this.app.workspace.requestSaveLayout();
+    };
+
+    private render() {
+        if (!this.root) return;
+        this.root.render(
+            <FulltextSearch
+                key={this.generation}
+                app={this.app}
+                initialScopes={this.evoScopes}
+                initialQuery={this.evoQuery}
+                onState={this.onState}
+            />,
+        );
+    }
+
+    async onOpen() {
+        this.containerEl.addClass(HEADERLESS);
+        this.contentEl.addClass("zotflow-evo-view");
+        this.root = createRoot(this.contentEl);
+        // The state arrives with setState(), which draws it again.
+        this.render();
+    }
+
+    async onClose() {
+        this.root?.unmount();
+        this.root = null;
+    }
+}
+
 /**
  * Register the views. The command that opens the library browser is the
  * fork's "Open Zotero library in a tab" (ui/evo-workspace.ts).
@@ -293,4 +417,8 @@ export function registerEvoLibrary(plugin: Plugin) {
         (leaf) => new EvoAnnotationsView(leaf),
     );
     plugin.registerView(DETAILS_VIEW_TYPE, (leaf) => new EvoDetailsView(leaf));
+    plugin.registerView(
+        FULLTEXT_VIEW_TYPE,
+        (leaf) => new EvoFulltextView(leaf),
+    );
 }

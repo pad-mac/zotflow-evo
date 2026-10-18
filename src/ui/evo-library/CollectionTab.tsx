@@ -16,19 +16,24 @@ import { workerBridge } from "bridge";
 import { services } from "services/services";
 import {
     openAnnotationsTab,
+    openFulltextSearch,
     openBookSearch,
     openItem,
     setItemsDrag,
 } from "ui/evo-library/actions";
 import { ItemTable } from "ui/evo-library/ItemTable";
-import { showItemMenu } from "ui/evo-library/menus";
+import { showItemMenu, showSortMenu } from "ui/evo-library/menus";
 import {
     ANNOTATIONS_ICON,
     ANNOTATIONS_ICON_FALLBACK,
     Icon,
     useLibraryChanges,
 } from "ui/evo-library/parts";
-import { publishSelection, selectionLabel } from "ui/evo-library/selection";
+import {
+    publishScope,
+    publishSelection,
+    selectionLabel,
+} from "ui/evo-library/selection";
 import {
     useRowEditing,
     useScopeRows,
@@ -104,6 +109,14 @@ export function CollectionTab({
     useEffect(() => {
         if (name) onName(name);
     }, [name, onName]);
+    useEffect(() => {
+        if (name)
+            publishScope({
+                libraryID: scope.libraryID,
+                collectionKey: scope.collectionKey,
+                label: name,
+            });
+    }, [name, scope.libraryID, scope.collectionKey]);
 
     const stableScope = useMemo(() => scope, [scope]);
     const { rows, loading } = useScopeRows(stableScope);
@@ -158,6 +171,15 @@ export function CollectionTab({
                     {loading ? "…" : sel.shown.length}
                 </span>
                 <span
+                    className="zotflow-evo-tool"
+                    title="Sort by"
+                    onClick={(e) =>
+                        showSortMenu(e.nativeEvent, table.sort, table.setSort)
+                    }
+                >
+                    <Icon name="arrow-up-down" fallback="arrow-down" />
+                </span>
+                <span
                     className={
                         "zotflow-evo-tool" +
                         (scope.subcollections ? " is-on" : "")
@@ -177,6 +199,20 @@ export function CollectionTab({
                         name={ANNOTATIONS_ICON}
                         fallback={ANNOTATIONS_ICON_FALLBACK}
                     />
+                </span>
+                <span
+                    className="zotflow-evo-tool"
+                    title="Search the full text of the documents here"
+                    onClick={() =>
+                        void openFulltextSearch(app, [
+                            {
+                                libraryID: scope.libraryID,
+                                collectionKey: scope.collectionKey,
+                            },
+                        ])
+                    }
+                >
+                    <Icon name="text-search" fallback="search" />
                 </span>
             </div>
             <ItemTable

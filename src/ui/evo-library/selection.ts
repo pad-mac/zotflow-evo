@@ -50,3 +50,21 @@ export function selectionLabel(row: {
         .filter(Boolean)
         .join(" ");
 }
+
+/** The library or collection shown last in a library tab (where new items go). */
+export interface ShownScope {
+    libraryID: number;
+    collectionKey: string | null;
+    /** Its name. */
+    label: string;
+}
+
+let lastShown: ShownScope | null = null;
+
+export function publishScope(scope: ShownScope): void {
+    lastShown = scope;
+}
+
+export function lastScope(): ShownScope | null {
+    return lastShown;
+}

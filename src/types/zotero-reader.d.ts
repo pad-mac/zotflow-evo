@@ -47,7 +47,13 @@ export interface CreateReaderOptions {
 /** ZotFlow Evo: what the head of the note strip shows. */
 export type NoteStripBanner =
     | string
-    | { authors?: string; year?: string; title?: string };
+    | {
+          authors?: string;
+          /** The names one by one: each opens that person's note. */
+          authorList?: string[];
+          year?: string;
+          title?: string;
+      };
 
 /** ZotFlow Evo: settings of the note strip beside a PDF or a snapshot. */
 export interface ReaderNoteStrip {
@@ -71,6 +77,8 @@ export interface ReaderNoteStrip {
      * the header is hidden (a click comes back as `noteStripAction`).
      */
     actions?: NoteStripAction[];
+    /** Colour filter over PDF pages (KOReader-like). */
+    pdfFilter?: { whiteThreshold: number; contrast: number; saturation: number };
 }
 
 /** ZotFlow Evo: a header button of the reader view, mirrored in the note strip. */

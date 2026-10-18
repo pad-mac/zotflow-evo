@@ -2,9 +2,11 @@
  * ZotFlow Evo (fork): the libraries and their collections, nested, in the
  * library browser's left pane. A click shows a collection's items;
  * Ctrl+right-click, a middle click (a three-finger tap) opens it in a tab
- * of its own; a right-click offers the rest (pin to the top among them).
- * Collections are dragged up and down among their siblings to order them;
- * items dropped on a collection are added to it. See FORK.md.
+ * of its own; a right-click offers the rest (pin, rename). A collection
+ * dragged onto the upper or lower edge of another goes before or after it
+ * (ordering siblings, or moving it to that level), onto its middle into it,
+ * onto a library to its top level. Items dropped on a collection are added
+ * to it. See FORK.md.
  */
 import React, { useEffect, useRef, useState } from "react";
 
@@ -13,6 +15,8 @@ import { Icon } from "ui/evo-library/parts";
 import {
     PINNED_SIBLINGS,
     collectionId,
+    collectionParents,
+    isInside,
     moveKey,
     orderTree,
     siblingsId,
@@ -47,12 +51,94 @@ export interface CollectionPaneProps {
         items: DraggedItems,
         collection: { libraryID: number; key: string; name: string },
     ) => void;
+    /**
+     * A collection dragged elsewhere: into `parentKey` (null: the top of
+     * its library), and where it was dropped there (`siblings` and their new
+     * order), if it was dropped beside one.
+     */
+    onMove: (
+        collection: { libraryID: number; key: string },
+        parentKey: string | null,
+        placed: { siblings: string; order: string[] } | null,
+    ) => void;
+    /** The collection being renamed (`collectionId()`), if one is. */
+    renaming: string | null;
+    /** The new name, or null when renaming was given up. */
+    onRenamed: (
+        collection: { libraryID: number; key: string; name: string },
+        name: string | null,
+    ) => void;
+    /** Sub-collections indented under their parents (setting). */
+    indent: boolean;
 }
 
 const MIME_COLLECTION = "application/x-zotflow-evo-collection";
 
 /** The collection being dragged in this window (drag data cannot be read before the drop). */
-let dragging: { siblings: string; id: string } | null = null;
+let dragging: {
+    siblings: string;
+    id: string;
+    libraryID: number;
+    key: string;
+} | null = null;
+
+/** Where on a row a collection is dropped: the upper and lower quarter are its edges. */
+function zoneOf(event: React.DragEvent): "before" | "after" | "into" {
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const y = event.clientY - box.top;
+    if (y < box.height / 4) return "before";
+    if (y > (box.height * 3) / 4) return "after";
+    return "into";
+}
+
+/** `keys` with `key` put before or after `target` (taken out where it was). */
+function placeKey(
+    keys: readonly string[],
+    key: string,
+    target: string,
+    after: boolean,
+): string[] {
+    const rest = keys.filter((k) => k !== key);
+    const at = rest.indexOf(target);
+    if (at < 0) return [...rest, key];
+    rest.splice(at + (after ? 1 : 0), 0, key);
+    return rest;
+}
+
+/** The name field of a collection being renamed. */
+function RenameField({
+    name,
+    onDone,
+}: {
+    name: string;
+    onDone: (name: string | null) => void;
+}) {
+    const ref = useRef<HTMLInputElement>(null);
+    const done = useRef(false);
+    useEffect(() => {
+        ref.current?.focus();
+        ref.current?.select();
+    }, []);
+    const finish = (value: string | null) => {
+        if (done.current) return;
+        done.current = true;
+        onDone(value);
+    };
+    return (
+        <input
+            ref={ref}
+            className="zotflow-evo-coll-rename"
+            defaultValue={name}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") finish(e.currentTarget.value);
+                else if (e.key === "Escape") finish(null);
+            }}
+            onBlur={(e) => finish(e.currentTarget.value)}
+        />
+    );
+}
 
 type DropMark = { row: string; where: "before" | "after" | "into" } | null;
 
@@ -66,7 +152,12 @@ export function CollectionPane({
     onMenu,
     onReorder,
     onDropItems,
+    onMove,
+    renaming,
+    onRenamed,
+    indent,
 }: CollectionPaneProps) {
+    const parents = collectionParents(libraries);
     // Expanded collections (collections start closed) and collapsed libraries.
     const [open, setOpen] = useState<Set<string>>(() => new Set());
     const [closedLibraries, setClosedLibraries] = useState<Set<number>>(
@@ -117,7 +208,7 @@ export function CollectionPane({
     }
 
     /**
-     * Dragging a collection among its siblings, and dropping items on it.
+     * Dragging a collection, and dropping collections or items on it.
      * `siblings` names the list it is in; `id` is how that list names it;
      * `order` is the list as shown.
      */
@@ -128,11 +219,39 @@ export function CollectionPane({
         order: string[],
     ) {
         const row = collectionId(node.libraryID, node.key);
+        const parentOf = (key: string) =>
+            parents.get(collectionId(node.libraryID, key)) ?? null;
+        /** What a collection dropped here (at `zone`) would do, if anything. */
+        const collectionDrop = (
+            zone: "before" | "after" | "into",
+        ): "reorder" | "into" | "beside" | null => {
+            const d = dragging;
+            if (!d || d.libraryID !== node.libraryID || d.key === node.key)
+                return null;
+            if (zone === "into")
+                return isInside(parents, node.libraryID, node.key, d.key)
+                    ? null
+                    : "into";
+            if (d.siblings === siblings) return "reorder";
+            // Beside one of another level: moved to that level. Not out of
+            // or into the pinned ones that way (pin or unpin for that).
+            if (siblings === PINNED_SIBLINGS || d.siblings === PINNED_SIBLINGS)
+                return null;
+            const parent = parentOf(node.key);
+            if (parent && isInside(parents, node.libraryID, parent, d.key))
+                return null;
+            return "beside";
+        };
         return {
-            draggable: true,
+            draggable: renaming !== row,
             onDragStart: (e: React.DragEvent) => {
                 e.stopPropagation();
-                dragging = { siblings, id };
+                dragging = {
+                    siblings,
+                    id,
+                    libraryID: node.libraryID,
+                    key: node.key,
+                };
                 e.dataTransfer.effectAllowed = "move";
                 e.dataTransfer.setData(MIME_COLLECTION, row);
             },
@@ -143,18 +262,15 @@ export function CollectionPane({
             onDragOver: (e: React.DragEvent) => {
                 const types = Array.from(e.dataTransfer.types);
                 if (types.includes(MIME_COLLECTION)) {
-                    // Only among its own siblings.
-                    if (!dragging || dragging.siblings !== siblings) return;
-                    if (dragging.id === id) return;
+                    const zone = zoneOf(e);
+                    if (!collectionDrop(zone)) {
+                        if (mark?.row === row) setMark(null);
+                        return;
+                    }
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
-                    const box = e.currentTarget.getBoundingClientRect();
-                    const where =
-                        e.clientY > box.top + box.height / 2
-                            ? "after"
-                            : "before";
-                    if (mark?.row !== row || mark.where !== where)
-                        setMark({ row, where });
+                    if (mark?.row !== row || mark.where !== zone)
+                        setMark({ row, where: zone });
                     return;
                 }
                 const library = draggedItemsLibrary(e.dataTransfer);
@@ -176,13 +292,34 @@ export function CollectionPane({
                 if (
                     Array.from(e.dataTransfer.types).includes(MIME_COLLECTION)
                 ) {
+                    const zone = zoneOf(e);
+                    const action = collectionDrop(zone);
                     const from = dragging;
                     dragging = null;
-                    if (!from || from.siblings !== siblings) return;
-                    const box = e.currentTarget.getBoundingClientRect();
-                    const after = e.clientY > box.top + box.height / 2;
-                    const next = moveKey(order, from.id, id, after);
-                    if (next.join() !== order.join()) onReorder(siblings, next);
+                    if (!from || !action) return;
+                    if (action === "reorder") {
+                        const next = moveKey(
+                            order,
+                            from.id,
+                            id,
+                            zone === "after",
+                        );
+                        if (next.join() !== order.join())
+                            onReorder(siblings, next);
+                    } else if (action === "into") {
+                        setOpen((current) => new Set(current).add(row));
+                        onMove(from, node.key, null);
+                    } else {
+                        onMove(from, parentOf(node.key), {
+                            siblings,
+                            order: placeKey(
+                                order,
+                                from.key,
+                                node.key,
+                                zone === "after",
+                            ),
+                        });
+                    }
                     return;
                 }
                 const items = readDraggedItems(e.dataTransfer);
@@ -192,6 +329,48 @@ export function CollectionPane({
                     key: node.key,
                     name: node.name,
                 });
+            },
+        };
+    }
+
+    /** A library row takes collections to its top level. */
+    function libraryDropHandlers(libraryID: number) {
+        const row = `${libraryID}:`;
+        const accepts = () => {
+            const d = dragging;
+            return (
+                !!d &&
+                d.libraryID === libraryID &&
+                parents.get(collectionId(libraryID, d.key)) !== null
+            );
+        };
+        return {
+            onDragOver: (e: React.DragEvent) => {
+                if (
+                    !Array.from(e.dataTransfer.types).includes(
+                        MIME_COLLECTION,
+                    ) ||
+                    !accepts()
+                )
+                    return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (mark?.row !== row) setMark({ row, where: "into" });
+            },
+            onDragLeave: (e: React.DragEvent) => {
+                const to = e.relatedTarget as Node | null;
+                if (to && e.currentTarget.contains(to)) return;
+                setMark((m) => (m?.row === row ? null : m));
+            },
+            onDrop: (e: React.DragEvent) => {
+                if (!Array.from(e.dataTransfer.types).includes(MIME_COLLECTION))
+                    return;
+                e.preventDefault();
+                setMark(null);
+                const ok = accepts();
+                const from = dragging;
+                dragging = null;
+                if (ok && from) onMove(from, null, null);
             },
         };
     }
@@ -228,7 +407,9 @@ export function CollectionPane({
                         (marked ? ` is-drop-${marked}` : "")
                     }
                     style={
-                        { "--zotflow-evo-depth": depth } as React.CSSProperties
+                        {
+                            "--zotflow-evo-depth": indent ? depth : 0,
+                        } as React.CSSProperties
                     }
                     title={node.name}
                     {...handlers({
@@ -255,7 +436,16 @@ export function CollectionPane({
                             />
                         )}
                     </span>
-                    <span className="zotflow-evo-coll-name">{node.name}</span>
+                    {renaming === key ? (
+                        <RenameField
+                            name={node.name}
+                            onDone={(name) => onRenamed(node, name)}
+                        />
+                    ) : (
+                        <span className="zotflow-evo-coll-name">
+                            {node.name}
+                        </span>
+                    )}
                 </div>
                 {expanded &&
                     children.map((child) =>
@@ -308,6 +498,9 @@ export function CollectionPane({
                                 "zotflow-evo-coll is-library" +
                                 (isCurrent(lib.libraryID, null)
                                     ? " is-current"
+                                    : "") +
+                                (mark?.row === `${lib.libraryID}:`
+                                    ? " is-drop-into"
                                     : "")
                             }
                             style={
@@ -319,6 +512,7 @@ export function CollectionPane({
                                 libraryID: lib.libraryID,
                                 collectionKey: null,
                             })}
+                            {...libraryDropHandlers(lib.libraryID)}
                         >
                             <span
                                 className={
@@ -353,7 +547,7 @@ export function CollectionPane({
                             top.map((c) =>
                                 renderCollection(
                                     c,
-                                    1,
+                                    0,
                                     topSiblings,
                                     c.key,
                                     topOrder,

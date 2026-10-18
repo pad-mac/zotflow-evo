@@ -58,7 +58,16 @@ vi.mock("obsidian", async (importOriginal) => {
 vi.mock("bridge", () => ({
     workerBridge: {
         evoLibrary: {
-            attachFilename: async () => "schmidgen_2005_lebendige_kräfte",
+            attachFilename: async () => ({
+                name: "schmidgen_2005_lebendige-kräfte",
+            }),
+            attachFilenameFor: async (parts: {
+                lastName: string;
+                year: string;
+                shortTitle: string;
+            }) => ({
+                name: `${parts.lastName.toLowerCase()}_${parts.year}_${parts.shortTitle.toLowerCase().split(" ").slice(0, 2).join("-")}`,
+            }),
         },
     },
 }));
@@ -87,8 +96,10 @@ vi.mock("ui/start-sync", () => ({
 import {
     attachRefusal,
     obtainFile,
+    saveAsNewItem,
     uploadAttachment,
 } from "ui/evo-library/attach-file";
+import { publishScope } from "ui/evo-library/selection";
 
 const pdf = new TextEncoder().encode("%PDF-1.7\nhello").buffer;
 const md5 = "0123456789abcdef0123456789abcdef";
@@ -210,7 +221,7 @@ describe("saving it to the item", () => {
                 route: "address",
             },
         );
-        expect(name).toBe("schmidgen_2005_lebendige_kräfte.pdf");
+        expect(name).toBe("schmidgen_2005_lebendige-kräfte.pdf");
         const [create, auth, upload, register] = state.calls;
         const item = JSON.parse(create!.body as string)[0];
         expect(item).toMatchObject({
@@ -314,5 +325,86 @@ describe("saving it to the item", () => {
             ),
         ).rejects.toThrow(/Parent item not found/);
         expect(state.calls).toHaveLength(1);
+    });
+});
+
+describe("a new item from the ISBN on the page", () => {
+    it("looks the ISBN up, gets the file, creates the book in the collection shown, saves the file to it", async () => {
+        publishScope({
+            libraryID: 7,
+            collectionKey: "COLL0001",
+            label: "Media theory",
+        });
+        state.routes = [
+            {
+                match: /openlibrary\.org\/api\/books\?bibkeys=ISBN:9783518294444/,
+                status: 200,
+                json: {
+                    "ISBN:9783518294444": {
+                        title: "Lebendige Kräfte",
+                        subtitle: "Helmholtz und die Nerven",
+                        authors: [{ name: "Henning Schmidgen" }],
+                        publish_date: "2005",
+                    },
+                },
+            },
+            {
+                match: /^POST https:\/\/api\.zotero\.org\/users\/7\/items$/,
+                status: 200,
+                json: { successful: { "0": { key: "NEWBOOK1" } } },
+            },
+            { match: /\/file$/, status: 200, json: { exists: 1 } },
+        ];
+        const webview = {
+            getURL: () => `https://annas-archive.gl/view/${md5}`,
+            executeJavaScript: async (code: string) =>
+                code.includes("innerText")
+                    ? "Lebendige Kräfte\nISBN-13 978-3-518-29444-4"
+                    : code.includes("PDFViewerApplication")
+                      ? btoa("%PDF-1.5 book")
+                      : null,
+        };
+        await saveAsNewItem(webview);
+        const book = state.calls.find(
+            (c) =>
+                c.url.endsWith("/items") &&
+                c.method === "POST" &&
+                (typeof c.body === "string" ? c.body : "").includes('"book"'),
+        );
+        expect(JSON.parse(book!.body as string)[0]).toMatchObject({
+            itemType: "book",
+            title: "Lebendige Kräfte: Helmholtz und die Nerven",
+            ISBN: "9783518294444",
+            date: "2005",
+            collections: ["COLL0001"],
+            creators: [
+                {
+                    creatorType: "author",
+                    firstName: "Henning",
+                    lastName: "Schmidgen",
+                },
+            ],
+        });
+        const attachment = state.calls.find((c) =>
+            (typeof c.body === "string" ? c.body : "").includes('"attachment"'),
+        );
+        expect(JSON.parse(attachment!.body as string)[0]).toMatchObject({
+            parentItem: "NEWBOOK1",
+            filename: "schmidgen_2005_lebendige-kräfte.pdf",
+        });
+    });
+
+    it("no ISBN on the page: nothing is created", async () => {
+        publishScope({
+            libraryID: 7,
+            collectionKey: null,
+            label: "My Library",
+        });
+        const webview = {
+            getURL: () => "https://example.org/",
+            executeJavaScript: async () => "no isbn",
+        };
+        await saveAsNewItem(webview);
+        expect(state.calls.filter((c) => c.method === "POST")).toHaveLength(0);
     });
 });

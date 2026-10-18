@@ -184,12 +184,16 @@ export interface EvoItemRow {
     key: string;
     itemType: string;
     title: string;
+    /** Zotero's short title, if set. */
+    shortTitle?: string;
     /** As Zotero's creator column. */
     creator: string;
     /** Last name of the first main creator, for sorting. */
     creatorSort: string;
     /** Full name of the first main creator. */
     firstCreator: string;
+    /** Last name of the first main creator. */
+    firstLastName?: string;
     year: string;
     date: string;
     publication: string;
@@ -515,12 +519,15 @@ export interface AnnotationLayout {
     thenBy: AnnotationThenBy;
     /** The order of items, wherever items are ordered. */
     itemOrder: AnnotationItemOrder;
+    /** Items the other way round (Z…A, newest first). */
+    descending?: boolean;
 }
 
 export const DEFAULT_ANNOTATION_LAYOUT: AnnotationLayout = {
     groupBy: "item",
     thenBy: "none",
     itemOrder: "title",
+    descending: false,
 };
 
 /** The eight colours of the Zotero reader, in its order. */
@@ -592,16 +599,17 @@ export function groupAnnotations(
         ? annotations.filter((a) => colors.has((a.color ?? "").toLowerCase()))
         : [...annotations];
 
+    const sign = layout.descending ? -1 : 1;
     const itemCompare = (ka: string, kb: string): number => {
         const a = items.get(ka);
         const b = items.get(kb);
         if (layout.itemOrder === "dateAdded") {
             const da = a?.dateAdded ?? "";
             const db = b?.dateAdded ?? "";
-            if (da !== db) return da < db ? -1 : 1;
+            if (da !== db) return (da < db ? -1 : 1) * sign;
         }
         return (
-            collator.compare(a?.title ?? "", b?.title ?? "") ||
+            collator.compare(a?.title ?? "", b?.title ?? "") * sign ||
             (ka < kb ? -1 : ka > kb ? 1 : 0)
         );
     };
@@ -845,7 +853,12 @@ export function splitPinned<T extends OrderedCollection>(
 
 /** The default name of a file saved to an item (LiquidJS; see FORK.md). */
 export const DEFAULT_ATTACH_FILENAME =
-    '{{ lastName | downcase }}_{{ year }}_{{ shortTitle | downcase | replace: " ", "_" }}';
+    '{{ lastName | downcase }}_{{ year }}_{{ shortTitle | downcase | split: " " | slice: 0, 2 | join: "-" }}';
+
+/** Earlier defaults: a stored one is replaced by the current (settings/evo-upgrade.ts). */
+export const PREVIOUS_ATTACH_FILENAMES: readonly string[] = [
+    '{{ lastName | downcase }}_{{ year }}_{{ shortTitle | downcase | replace: " ", "_" }}',
+];
 
 /**
  * A rendered name made safe as a file name: markup and characters no file
@@ -917,4 +930,43 @@ export function embeddedUrls(url: string): string[] {
     } catch {
         return [];
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Moving collections                                                */
+/* ------------------------------------------------------------------ */
+
+/** Each collection's parent ("libraryID:key" → parent key, null at the top). */
+export function collectionParents(
+    libraries: readonly {
+        libraryID: number;
+        collections: OrderedCollection[];
+    }[],
+): Map<string, string | null> {
+    const out = new Map<string, string | null>();
+    const walk = (nodes: OrderedCollection[], parent: string | null) => {
+        for (const n of nodes) {
+            out.set(collectionId(n.libraryID, n.key), parent);
+            walk(n.children, n.key);
+        }
+    };
+    for (const lib of libraries) walk(lib.collections, null);
+    return out;
+}
+
+/** Whether `key` is `ancestor` or inside it (a collection cannot move into itself). */
+export function isInside(
+    parents: ReadonlyMap<string, string | null>,
+    libraryID: number,
+    key: string,
+    ancestor: string,
+): boolean {
+    let at: string | null | undefined = key;
+    const seen = new Set<string>();
+    while (at && !seen.has(at)) {
+        if (at === ancestor) return true;
+        seen.add(at);
+        at = parents.get(collectionId(libraryID, at));
+    }
+    return false;
 }

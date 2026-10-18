@@ -91,6 +91,12 @@ export class LibraryCache {
         return this.entries.get(libraryID)?.canWrite ?? false;
     }
 
+    /** ZotFlow Evo: the personal library's id (Zotero's user id), if known. */
+    personalLibraryID(): number | null {
+        for (const [id, entry] of this.entries) if (!entry.isGroup) return id;
+        return null;
+    }
+
     /** Whether the library is a Zotero group library (vs. the personal one). */
     isGroup(libraryID: number): boolean {
         return this.entries.get(libraryID)?.isGroup ?? false;

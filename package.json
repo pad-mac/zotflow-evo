@@ -63,6 +63,7 @@
         "@codemirror/state": "6.5.0",
         "@codemirror/view": "6.38.6",
         "@leeoniya/ufuzzy": "^1.0.19",
+        "@sqlite.org/sqlite-wasm": "3.53.4-build2",
         "@types/nunjucks": "^3.2.6",
         "citeproc": "^2.4.63",
         "clsx": "^2.1.1",

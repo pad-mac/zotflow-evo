@@ -84,6 +84,11 @@ export function useTableSettings(which: "library" | "collection") {
         },
         [],
     );
+    const setSort = useCallback((next: SortSpec) => {
+        setSortState(next);
+        services.settings.evoLibrarySort = { ...next };
+        saveSettings();
+    }, []);
     const toggleSort = useCallback((column: ColumnId) => {
         setSortState((current) => {
             const next =
@@ -102,6 +107,7 @@ export function useTableSettings(which: "library" | "collection") {
         widths,
         setWidths: changeWidths,
         sort,
+        setSort,
         toggleSort,
     };
 }
@@ -214,11 +220,32 @@ export function useSelection(
 
     const selectAll = useCallback(() => setSelected(new Set(order)), [order]);
 
+    /** Select one row by key; false when it is not listed. */
+    const selectKey = useCallback(
+        (key: string) => {
+            if (!order.includes(key)) return false;
+            setSelected(new Set([key]));
+            anchor.current = key;
+            setFocusKey(key);
+            return true;
+        },
+        [order],
+    );
+
     const selectedRows = useMemo(
         () => shown.filter((r) => selected.has(r.key)),
         [shown, selected],
     );
-    return { shown, selected, selectedRows, focusKey, select, move, selectAll };
+    return {
+        shown,
+        selected,
+        selectedRows,
+        focusKey,
+        select,
+        move,
+        selectAll,
+        selectKey,
+    };
 }
 
 /** An edit waiting for Enter: take the selection out of the collection, or trash it. */

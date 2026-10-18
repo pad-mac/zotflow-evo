@@ -6,8 +6,13 @@ import {
     DEFAULT_LIBRARY_COLUMNS,
 } from "utils/evo-library-model";
 
+import { DEFAULT_FULLTEXT_LAYOUT } from "utils/evo-fulltext";
+import { DEFAULT_PDF_FILTER } from "utils/evo-pdf-filter";
+
 import type { CustomReaderTheme } from "types/zotero-reader";
 import type { AnnotationLayout } from "utils/evo-library-model";
+import type { FulltextLayout } from "utils/evo-fulltext";
+import type { PdfFilter } from "utils/evo-pdf-filter";
 import type { OutputFormat as CslOutputFormat } from "worker/csl";
 
 /** Per-library sync mode. */
@@ -150,6 +155,16 @@ export interface ZotFlowSettings {
     evoAttachFilename: string;
     /** ZotFlow Evo: Anna's Archive member key for its download API (kept in SecretStorage, not data.json). */
     evoAnnasKey?: string;
+    /** ZotFlow Evo: Zotero's data folder (full-text search); empty: ~/Zotero. */
+    evoZoteroDataDir: string;
+    /** ZotFlow Evo: how the full-text search groups and orders, and its switches. */
+    evoFulltextLayout: FulltextLayout;
+    evoFulltextMatchCase: boolean;
+    evoFulltextWholeWords: boolean;
+    /** ZotFlow Evo: sub-collections are indented under their parents in the library browser. */
+    evoCollectionIndent: boolean;
+    /** ZotFlow Evo: colour filter over PDF pages (KOReader-like). */
+    readerPdfFilter: PdfFilter;
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -283,6 +298,12 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoCollectionOrder: {},
     evoLibraryDetailsShown: true,
     evoAttachFilename: DEFAULT_ATTACH_FILENAME,
+    evoZoteroDataDir: "",
+    evoFulltextLayout: { ...DEFAULT_FULLTEXT_LAYOUT },
+    evoFulltextMatchCase: false,
+    evoFulltextWholeWords: false,
+    evoCollectionIndent: true,
+    readerPdfFilter: { ...DEFAULT_PDF_FILTER },
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

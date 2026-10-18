@@ -2,7 +2,11 @@
  * ZotFlow Evo (fork): workspace commands. "Open Zotero library in a tab"
  * opens the library browser (ui/evo-library/). See FORK.md.
  */
-import { openDetailsTab, openLibraryBrowser } from "ui/evo-library/actions";
+import {
+    openDetailsTab,
+    openFulltextSearch,
+    openLibraryBrowser,
+} from "ui/evo-library/actions";
 import { EvoCollectionView, EvoLibraryView } from "ui/evo-library/views";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 
@@ -66,6 +70,22 @@ export function registerEvoWorkspaceCommands(plugin: Plugin) {
         name: "Open the selected Zotero item in a pane",
         callback: () => {
             ff(openDetailsTab(plugin.app), "Failed to open the item pane");
+        },
+    });
+
+    plugin.addCommand({
+        id: "fulltext-search",
+        name: "Search the full text of Zotero documents",
+        callback: () => {
+            const { workspace } = plugin.app;
+            const view =
+                workspace.getActiveViewOfType(EvoLibraryView) ??
+                workspace.getActiveViewOfType(EvoCollectionView);
+            const target = view?.currentTarget();
+            ff(
+                openFulltextSearch(plugin.app, target ? [target] : []),
+                "Failed to open the full-text search",
+            );
         },
     });
 }

@@ -19,7 +19,10 @@ import {
     iconOr,
 } from "ui/evo-library/parts";
 
+import { COLUMNS } from "utils/evo-library-model";
+
 import type { App, WorkspaceLeaf } from "obsidian";
+import type { ColumnId, SortSpec } from "utils/evo-library-model";
 import type { EvoItemRow } from "utils/evo-library-model";
 import type { EvoScope } from "worker/services/evo-library";
 
@@ -104,9 +107,16 @@ export function showCollectionMenu(
         /** Whether it is pinned to the top; absent for a library. */
         pinned?: boolean;
         onPin?: (on: boolean) => void;
+        onRename?: () => void;
     },
 ): void {
     const menu = new Menu();
+    if (options.onRename) {
+        const onRename = options.onRename;
+        menu.addItem((item) =>
+            item.setTitle("Rename…").setIcon("pencil").onClick(onRename),
+        );
+    }
     if (scope.collectionKey !== null && options.onPin) {
         const { onPin, pinned } = options;
         menu.addItem((item) =>
@@ -136,6 +146,45 @@ export function showCollectionMenu(
             .setTitle("Show items from sub-collections")
             .setChecked(options.subcollections)
             .onClick(() => options.onSubcollections(!options.subcollections)),
+    );
+    menu.showAtMouseEvent(event);
+}
+
+/**
+ * The table's sort order, from the toolbar: any column, shown or not (so a
+ * table sorted by date added need not show that column), either way.
+ */
+export function showSortMenu(
+    event: MouseEvent,
+    sort: SortSpec,
+    onSort: (sort: SortSpec) => void,
+): void {
+    const menu = new Menu();
+    for (const def of COLUMNS) {
+        menu.addItem((item) =>
+            item
+                .setTitle(def.label)
+                .setChecked(sort.column === def.id)
+                .onClick(() =>
+                    onSort({
+                        column: def.id,
+                        descending: sort.descending,
+                    }),
+                ),
+        );
+    }
+    menu.addSeparator();
+    menu.addItem((item) =>
+        item
+            .setTitle("Ascending")
+            .setChecked(!sort.descending)
+            .onClick(() => onSort({ ...sort, descending: false })),
+    );
+    menu.addItem((item) =>
+        item
+            .setTitle("Descending")
+            .setChecked(sort.descending)
+            .onClick(() => onSort({ ...sort, descending: true })),
     );
     menu.showAtMouseEvent(event);
 }

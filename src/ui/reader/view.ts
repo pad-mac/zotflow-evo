@@ -669,7 +669,10 @@ export class ZoteroReaderView extends ItemView {
     private finishPendingNavigation(openedAt: ReaderNavigation | undefined) {
         const pending = this.pendingNavigation;
         this.pendingNavigation = undefined;
-        if (pending && pending !== openedAt) this.readerNavigate(pending);
+        // A search to open at (full-text search) is not something Zotero's
+        // `location` option does: it is sent once the reader is open.
+        if (pending && (pending !== openedAt || pending.evoFind))
+            this.readerNavigate(pending);
     }
 
     readerNavigate(navigationInfo: ReaderNavigation) {

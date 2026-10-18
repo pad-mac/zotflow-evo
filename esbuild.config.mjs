@@ -100,6 +100,61 @@ const inlineWorkerPlugin = {
 };
 
 /**
+ * ZotFlow Evo: the full-text search worker (src/fulltext/worker.ts), with
+ * SQLite's WebAssembly binary inside it, built on its own and embedded
+ * gzipped: it is only unpacked and started while a search view is open.
+ */
+const sqliteWasmPlugin = {
+    name: "sqlite-wasm-binary",
+    setup(build) {
+        build.onResolve({ filter: /^virtual:sqlite-wasm-binary$/ }, () => ({
+            path: path.resolve(
+                "node_modules/@sqlite.org/sqlite-wasm/dist/sqlite3.wasm",
+            ),
+        }));
+    },
+};
+
+const fulltextWorkerPlugin = {
+    name: "fulltext-worker-plugin",
+    setup(build) {
+        build.onResolve({ filter: /^virtual:fulltext-worker$/ }, (args) => ({
+            path: args.path,
+            namespace: "fulltext-worker-code",
+        }));
+        build.onLoad(
+            { filter: /.*/, namespace: "fulltext-worker-code" },
+            async () => {
+                const result = await esbuild.build({
+                    entryPoints: [path.resolve("src/fulltext/worker.ts")],
+                    bundle: true,
+                    write: false,
+                    format: "iife",
+                    target: "es2020",
+                    minify: prod,
+                    platform: "browser",
+                    loader: { ".wasm": "binary" },
+                    plugins: [sqliteWasmPlugin],
+                    // import.meta.url only names where the binary would be
+                    // fetched from; it is handed over instead.
+                    logOverride: { "empty-import-meta": "silent" },
+                });
+                const code = result.outputFiles[0].text;
+                const base64 = zlib.gzipSync(code).toString("base64");
+                return {
+                    contents: `export default ${JSON.stringify(base64)};`,
+                    loader: "js",
+                    watchFiles: [
+                        path.resolve("src/fulltext/worker.ts"),
+                        path.resolve("src/utils/evo-fulltext.ts"),
+                    ],
+                };
+            },
+        );
+    },
+};
+
+/**
  * Custom plugin: Inline resources
  * When import "virtual:reader-resources", it will return a function that can be used to load resources.
  */
@@ -224,7 +279,12 @@ const context = await esbuild.context({
     treeShaking: true,
     outfile: "main.js",
     minify: prod,
-    plugins: [inlineResourcePlugin, copyLicensePlugin, inlineWorkerPlugin],
+    plugins: [
+        inlineResourcePlugin,
+        copyLicensePlugin,
+        inlineWorkerPlugin,
+        fulltextWorkerPlugin,
+    ],
 });
 
 if (prod) {

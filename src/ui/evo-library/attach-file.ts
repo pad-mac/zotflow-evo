@@ -23,7 +23,13 @@ import SparkMD5 from "spark-md5";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { startSync } from "ui/start-sync";
-import { lastSelection } from "ui/evo-library/selection";
+import { lastScope, lastSelection } from "ui/evo-library/selection";
+import {
+    findIsbns,
+    fromGoogleBooks,
+    fromOpenLibrary,
+    yearOfDate,
+} from "utils/evo-isbn";
 import {
     DEFAULT_BOOK_SEARCH_URL,
     embeddedUrls,
@@ -33,6 +39,7 @@ import {
 
 import type { App, Plugin, RequestUrlResponse, WorkspaceLeaf } from "obsidian";
 import type { SelectedItem } from "ui/evo-library/selection";
+import type { BookMetadata } from "utils/evo-isbn";
 
 /* ------------------------------------------------------------------ */
 /*  Files                                                             */
@@ -250,6 +257,14 @@ export function attachRefusal(libraryID: number): string | null {
 export async function uploadAttachment(
     target: { libraryID: number; key: string },
     file: FetchedFile,
+    /** For an item not synced here yet: what its file name is made of. */
+    parts?: {
+        lastName: string;
+        year: string;
+        shortTitle: string;
+        title: string;
+        itemType: string;
+    },
 ): Promise<string> {
     const refusal = attachRefusal(target.libraryID);
     if (refusal) throw new Error(refusal);
@@ -258,12 +273,15 @@ export async function uploadAttachment(
         ? `groups/${target.libraryID}`
         : `users/${target.libraryID}`;
     const api = `https://api.zotero.org/${prefix}`;
-    const name =
-        (await workerBridge.evoLibrary.attachFilename(
-            target.libraryID,
-            target.key,
-        )) || "file";
-    const filename = `${name}.${file.extension}`;
+    const named = parts
+        ? await workerBridge.evoLibrary.attachFilenameFor(parts)
+        : await workerBridge.evoLibrary.attachFilename(
+              target.libraryID,
+              target.key,
+          );
+    if (named.problem)
+        services.notificationService.notify("warning", named.problem);
+    const filename = `${named.name || "file"}.${file.extension}`;
 
     // 1. The attachment item (Zotero's template for a stored file).
     const created = await requestUrl({
@@ -438,6 +456,156 @@ export async function saveUrlToItem(
     }
 }
 
+/* ------------------------------------------------------------------ */
+/*  A new item from the ISBN on the page                              */
+/* ------------------------------------------------------------------ */
+
+/** The valid ISBNs in the text of the page shown. */
+async function isbnsOnPage(webview: WebviewLike): Promise<string[]> {
+    const text = (await webview.executeJavaScript(
+        "document.body ? document.body.innerText : ''",
+    )) as string;
+    return findIsbns(String(text ?? "").slice(0, 400_000));
+}
+
+/** A book's metadata for an ISBN: Open Library, else Google Books. */
+export async function lookupIsbn(isbn: string): Promise<BookMetadata | null> {
+    try {
+        const ol = await requestUrl({
+            url: `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`,
+            throw: false,
+        });
+        const found =
+            ol.status < 300 ? fromOpenLibrary(jsonOf(ol), isbn) : null;
+        if (found) return found;
+    } catch {
+        // Google Books next.
+    }
+    try {
+        const gb = await requestUrl({
+            url: `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`,
+            throw: false,
+        });
+        return gb.status < 300 ? fromGoogleBooks(jsonOf(gb), isbn) : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Create a book item with Zotero's web API; returns its key. */
+export async function createBookItem(
+    libraryID: number,
+    collectionKey: string | null,
+    book: BookMetadata,
+): Promise<string> {
+    const prefix = services.libraryCache.isGroup(libraryID)
+        ? `groups/${libraryID}`
+        : `users/${libraryID}`;
+    const res = await requestUrl({
+        url: `https://api.zotero.org/${prefix}/items`,
+        method: "POST",
+        headers: {
+            "Zotero-API-Key": services.settings.zoteroapikey,
+            "Zotero-API-Version": "3",
+            "Zotero-Write-Token": writeToken(),
+        },
+        contentType: "application/json",
+        body: JSON.stringify([
+            {
+                itemType: "book",
+                title: book.title,
+                creators: book.creators,
+                date: book.date,
+                publisher: book.publisher,
+                place: book.place,
+                numPages: book.numPages,
+                language: book.language,
+                ISBN: book.ISBN,
+                collections: collectionKey ? [collectionKey] : [],
+                tags: [],
+                relations: {},
+            },
+        ]),
+        throw: false,
+    });
+    const json = jsonOf<{
+        successful?: Record<string, { key?: string }>;
+        failed?: Record<string, { message?: string }>;
+    }>(res);
+    const key = json?.successful?.["0"]?.key;
+    if (res.status >= 300 || !key)
+        throw new Error(
+            `Zotero refused the new item (${res.status}${json?.failed?.["0"]?.message ? ": " + json.failed["0"].message : ""}).`,
+        );
+    return key;
+}
+
+/**
+ * A new book item, from the ISBN on the page shown, in the library or
+ * collection shown last in a library tab, with the page's file saved to it.
+ * The file is got first: nothing is created when there is none.
+ */
+export async function saveAsNewItem(webview: WebviewLike): Promise<void> {
+    const notify = services.notificationService;
+    const scope = lastScope();
+    if (!scope) {
+        notify.notify(
+            "warning",
+            "Open the collection in a Zotero library tab first.",
+        );
+        return;
+    }
+    const refused = attachRefusal(scope.libraryID);
+    if (refused) {
+        notify.notify("error", refused);
+        return;
+    }
+    try {
+        const isbns = await isbnsOnPage(webview);
+        if (!isbns.length)
+            throw new Error(
+                "No ISBN on this page. Use the book's page on Anna's Archive.",
+            );
+        let book: BookMetadata | null = null;
+        for (const isbn of isbns.slice(0, 4)) {
+            book = await lookupIsbn(isbn);
+            if (book) break;
+        }
+        if (!book)
+            throw new Error(
+                `No book found for ISBN ${isbns[0]} (Open Library, Google Books).`,
+            );
+        notify.notify("info", `Getting the file for “${book.title}”…`);
+        const file = await obtainFile(webview.getURL(), webview);
+        const key = await createBookItem(
+            scope.libraryID,
+            scope.collectionKey,
+            book,
+        );
+        const name = await uploadAttachment(
+            { libraryID: scope.libraryID, key },
+            file,
+            {
+                lastName: book.creators[0]?.lastName ?? "",
+                year: yearOfDate(book.date),
+                shortTitle: book.title.split(":")[0]!.trim(),
+                title: book.title,
+                itemType: "book",
+            },
+        );
+        notify.notify(
+            "success",
+            `Created “${book.title}” (ISBN ${book.ISBN}) in “${scope.label}”, with “${name}” (via ${file.route}).`,
+        );
+    } catch (e) {
+        services.logService.error("Failed to create the item", "EvoAttach", e);
+        notify.notify(
+            "error",
+            e instanceof Error ? e.message : "Couldn't create the item.",
+        );
+    }
+}
+
 /** The web viewer leaf to save from: the active one, else the last one used. */
 function webViewerLeaf(app: App): WorkspaceLeaf | null {
     const active = app.workspace.getMostRecentLeaf();
@@ -468,10 +636,11 @@ export function showSaveMenu(
                 (o) => o?.libraryID === t.libraryID && o?.key === t.key,
             ) === i,
     );
-    if (!targets.length) {
+    const scope = lastScope();
+    if (!targets.length && !scope) {
         services.notificationService.notify(
             "warning",
-            "Select the item in a Zotero library tab first.",
+            "Select the item (or open the collection) in a Zotero library tab first.",
         );
         return;
     }
@@ -484,6 +653,15 @@ export function showSaveMenu(
                 .onClick(
                     () => void saveUrlToItem(webview.getURL(), webview, target),
                 ),
+        );
+    }
+    if (scope) {
+        if (targets.length) menu.addSeparator();
+        menu.addItem((item) =>
+            item
+                .setTitle(`New item from this page's ISBN, in “${scope.label}”`)
+                .setIcon("book-plus")
+                .onClick(() => void saveAsNewItem(webview)),
         );
     }
     if (event) menu.showAtMouseEvent(event);
@@ -549,7 +727,7 @@ export function registerAttachFromWebViewer(plugin: Plugin): void {
         name: "Save the web viewer's file to the selected Zotero item",
         checkCallback: (checking) => {
             const leaf = webViewerLeaf(app);
-            if (!leaf || !attachTarget()) return false;
+            if (!leaf || (!attachTarget() && !lastScope())) return false;
             if (!checking) showSaveMenu(app, leaf);
             return true;
         },

@@ -6,11 +6,16 @@
  * when long, and below a line the annotations of the file it opens, which
  * scroll on their own too. See FORK.md.
  */
+import { Keymap } from "obsidian";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { workerBridge } from "bridge";
 import { services } from "services/services";
-import { openAnnotation, openBookSearch } from "ui/evo-library/actions";
+import {
+    openAnnotation,
+    openBookSearch,
+    revealInLibrary,
+} from "ui/evo-library/actions";
 import { onSelection, lastSelection } from "ui/evo-library/selection";
 import {
     AnnotationCard,
@@ -49,16 +54,45 @@ export interface ItemDetailsProps {
     app: App;
     leaf: WorkspaceLeaf;
     details: EvoItemDetails | null;
+    /** A collection of the item was clicked: show it there. */
+    onShowInCollection?: (
+        libraryID: number,
+        collectionKey: string,
+        itemKey: string,
+    ) => void;
     /** How many items are selected (the pane shows the focused one). */
     count: number;
     /** What to say with nothing to show. */
     emptyText?: string;
 }
 
+/**
+ * A person's name as a link to their note, as `[[Name]]` would be: a
+ * click opens it (Ctrl/Cmd: in a new tab); Obsidian creates it if missing.
+ */
+function PersonLink({ app, name }: { app: App; name: string }) {
+    return (
+        <span
+            className="zotflow-evo-person"
+            onClick={(e) => {
+                e.stopPropagation();
+                void app.workspace.openLinkText(
+                    name,
+                    "",
+                    Keymap.isModEvent(e.nativeEvent),
+                );
+            }}
+        >
+            {name}
+        </span>
+    );
+}
+
 export function ItemDetails({
     app,
     leaf,
     details,
+    onShowInCollection,
     count,
     emptyText,
 }: ItemDetailsProps) {
@@ -71,8 +105,7 @@ export function ItemDetails({
             </div>
         );
     }
-    const authors =
-        details.authors.join(", ") + (details.moreAuthors ? " et al." : "");
+    const hasAuthors = details.authors.some((a) => a.trim());
     const openable = details.attachments.filter(
         (a) => a.kind === "pdf" || a.kind === "epub" || a.kind === "snapshot",
     );
@@ -102,8 +135,16 @@ export function ItemDetails({
                 <div className="zotflow-evo-details-title">
                     <Title text={details.title} />
                 </div>
-                {authors.trim() && (
-                    <div className="zotflow-evo-details-authors">{authors}</div>
+                {hasAuthors && (
+                    <div className="zotflow-evo-details-authors">
+                        {details.authors.map((name, i) => (
+                            <React.Fragment key={i}>
+                                {i > 0 && ", "}
+                                <PersonLink app={app} name={name} />
+                            </React.Fragment>
+                        ))}
+                        {details.moreAuthors && " et al."}
+                    </div>
                 )}
                 {details.year && (
                     <div className="zotflow-evo-details-year">
@@ -113,6 +154,30 @@ export function ItemDetails({
                 {details.publication && (
                     <div className="zotflow-evo-details-pub">
                         {details.publication}
+                    </div>
+                )}
+                {details.collections.length > 0 && (
+                    <div className="zotflow-evo-details-colls">
+                        <Icon
+                            name="library"
+                            className="zotflow-evo-details-colls-icon"
+                        />
+                        {details.collections.map((c) => (
+                            <span
+                                key={c.key}
+                                className="zotflow-evo-details-coll"
+                                title={`Show in “${c.name}”`}
+                                onClick={() =>
+                                    onShowInCollection?.(
+                                        details.libraryID,
+                                        c.key,
+                                        details.key,
+                                    )
+                                }
+                            >
+                                {c.name}
+                            </span>
+                        ))}
                     </div>
                 )}
                 {(details.attachments.length > 0 || regular) && (
@@ -234,6 +299,9 @@ export function DetailsTab({ app, leaf }: { app: App; leaf: WorkspaceLeaf }) {
             details={details}
             count={item ? 1 : 0}
             emptyText="Select an item in a library tab."
+            onShowInCollection={(libraryID, collectionKey, itemKey) =>
+                void revealInLibrary(app, libraryID, collectionKey, itemKey)
+            }
         />
     );
 }

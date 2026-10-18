@@ -19,6 +19,7 @@ import {
     fullName,
     lastName,
     mainCreators,
+    plainTitle,
     sanitizeFilename,
 } from "utils/evo-library-model";
 import { extractYear } from "utils/date";
@@ -83,6 +84,8 @@ export interface EvoItemDetails {
     publication: string;
     abstract: string;
     attachments: EvoAttachmentInfo[];
+    /** The collections it is in, by name. */
+    collections: { key: string; name: string }[];
     /** The attachment a double click opens, if one is (see choosePrimaryAttachment()). */
     primaryKey: string | null;
     /** Annotations of the primary attachment, or of each candidate when there is none. */
@@ -246,14 +249,66 @@ export class EvoLibraryService {
         const item = await db.items.get([libraryID, key]);
         if (!item) return null;
         const main = mainCreators(creatorsOf(item));
-        const title = item.title || field(item, "title");
+        const clean = (s: string) => plainTitle(s).replace(/\s+/g, " ").trim();
+        const title = clean(item.title || field(item, "title"));
         return {
             lastName: main[0] ? lastName(main[0]) : "",
             year: extractYear(field(item, "date")),
-            shortTitle: field(item, "shortTitle") || title,
+            shortTitle: clean(field(item, "shortTitle")) || title,
             title,
             itemType: item.itemType,
         };
+    }
+
+    /** What a collection edit needs to know (the edit itself goes to Zotero's API). */
+    async collectionInfo(
+        libraryID: number,
+        key: string,
+    ): Promise<{
+        version: number;
+        name: string;
+        parentCollection: string;
+    } | null> {
+        const c = await db.collections.get([libraryID, key]);
+        if (!c) return null;
+        return {
+            version: c.version,
+            name: c.name,
+            parentCollection: c.parentCollection,
+        };
+    }
+
+    /**
+     * Zotero took an edit of a collection (renamed, moved): show it here at
+     * once. The next sync brings the same from the server.
+     */
+    async collectionWritten(
+        libraryID: number,
+        key: string,
+        patch: { name?: string; parentCollection?: string | false },
+        version: number,
+    ): Promise<void> {
+        const c = await db.collections.get([libraryID, key]);
+        if (!c) return;
+        const data = { ...c.raw.data } as Record<string, unknown>;
+        if (patch.name !== undefined) data.name = patch.name;
+        if (patch.parentCollection !== undefined)
+            data.parentCollection = patch.parentCollection;
+        await db.collections.put({
+            ...c,
+            name: patch.name ?? c.name,
+            parentCollection:
+                patch.parentCollection === undefined
+                    ? c.parentCollection
+                    : patch.parentCollection || "",
+            version: version || c.version,
+            raw: {
+                ...c.raw,
+                version: version || c.raw.version,
+                data: data as typeof c.raw.data,
+            },
+        });
+        this.parentHost?.emit("treeChanged");
     }
 
     private readonly filenameEngine = new Liquid({ greedy: false });
@@ -264,24 +319,47 @@ export class EvoLibraryService {
      * made safe for file systems. The default template where the user's
      * fails or renders nothing.
      */
-    async attachFilename(libraryID: number, key: string): Promise<string> {
+    async attachFilename(
+        libraryID: number,
+        key: string,
+    ): Promise<{ name: string; problem?: string }> {
         const parts = await this.filenameParts(libraryID, key);
-        if (!parts) return "";
+        if (!parts) return { name: "" };
+        return this.attachFilenameFor(parts);
+    }
+
+    /** The same for an item not here yet (one being created), from its parts. */
+    async attachFilenameFor(parts: {
+        lastName: string;
+        year: string;
+        shortTitle: string;
+        title: string;
+        itemType: string;
+    }): Promise<{ name: string; problem?: string }> {
         const render = async (template: string) =>
             sanitizeFilename(
                 String(
                     await this.filenameEngine.parseAndRender(template, parts),
                 ),
             ).replace(/^[_ -]+|[_ -]+$/g, "");
+        const template =
+            this.settings.evoAttachFilename || DEFAULT_ATTACH_FILENAME;
         try {
-            const name = await render(
-                this.settings.evoAttachFilename || DEFAULT_ATTACH_FILENAME,
-            );
-            if (name) return name;
-        } catch {
-            // The default below.
+            const name = await render(template);
+            if (name && name !== "file") return { name };
+            if (template !== DEFAULT_ATTACH_FILENAME)
+                return {
+                    name: (await render(DEFAULT_ATTACH_FILENAME)) || "file",
+                    problem:
+                        "The file name template gave nothing; the default was used.",
+                };
+            return { name: name || "file" };
+        } catch (e) {
+            return {
+                name: (await render(DEFAULT_ATTACH_FILENAME)) || "file",
+                problem: `The file name template failed (${e instanceof Error ? e.message.split("\n")[0] : String(e)}); the default was used.`,
+            };
         }
-        return (await render(DEFAULT_ATTACH_FILENAME)) || "file";
     }
 
     updateSettings(settings: ZotFlowSettings) {
@@ -472,9 +550,11 @@ export class EvoLibraryService {
                 key: item.key,
                 itemType: item.itemType,
                 title: item.title || field(item, "title") || "Untitled",
+                shortTitle: field(item, "shortTitle"),
                 creator: creatorSummary(creators),
                 creatorSort: main.map(lastName).join(" "),
                 firstCreator: main[0] ? fullName(main[0]) : "",
+                firstLastName: main[0] ? lastName(main[0]) : "",
                 year: extractYear(field(item, "date")),
                 date: field(item, "date"),
                 publication: field(item, "publicationTitle"),
@@ -521,11 +601,26 @@ export class EvoLibraryService {
                 annotations.push({ ...a, attachmentKey: attachment.key });
         }
         const main = mainCreators(creatorsOf(item));
+        const collectionKeys = Array.isArray(
+            (item.raw?.data as { collections?: unknown } | undefined)
+                ?.collections,
+        )
+            ? (item.raw.data as { collections: string[] }).collections
+            : [];
+        const collections = (
+            await db.collections.bulkGet(
+                collectionKeys.map((k): [number, string] => [libraryID, k]),
+            )
+        )
+            .filter((c): c is IDBZoteroCollection => !!c && !c.trashed)
+            .map((c) => ({ key: c.key, name: c.name }))
+            .sort((a, b) => collator.compare(a.name, b.name));
         return {
             libraryID,
             key,
             itemType: item.itemType,
             title: item.title || field(item, "title") || "Untitled",
+            collections,
             authors: main.slice(0, 2).map(fullName),
             moreAuthors: main.length > 2,
             firstCreator: main[0] ? fullName(main[0]) : "",
@@ -546,14 +641,20 @@ export class EvoLibraryService {
     async itemBanner(
         libraryID: number,
         key: string,
-    ): Promise<{ authors: string; year: string; title: string } | null> {
+    ): Promise<{
+        authors: string;
+        authorList: string[];
+        year: string;
+        title: string;
+    } | null> {
         const item = await db.items.get([libraryID, key]);
         if (!item) return null;
+        const names = mainCreators(creatorsOf(item))
+            .map(fullName)
+            .filter(Boolean);
         return {
-            authors: mainCreators(creatorsOf(item))
-                .map(fullName)
-                .filter(Boolean)
-                .join(", "),
+            authors: names.join(", "),
+            authorList: names,
             year: extractYear(field(item, "date")),
             title: item.title || field(item, "title") || "",
         };

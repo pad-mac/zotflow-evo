@@ -202,6 +202,27 @@ export function AnnotationBrowser({
                     onChange={(itemOrder) => setLayout({ itemOrder })}
                 />
                 <span
+                    className="zotflow-evo-tool"
+                    title={
+                        layout.descending
+                            ? "Descending (newest, Z first)"
+                            : "Ascending (oldest, A first)"
+                    }
+                    aria-pressed={!!layout.descending}
+                    onClick={() =>
+                        setLayout({ descending: !layout.descending })
+                    }
+                >
+                    <Icon
+                        name={
+                            layout.descending
+                                ? "arrow-down-wide-narrow"
+                                : "arrow-up-narrow-wide"
+                        }
+                        fallback={layout.descending ? "arrow-down" : "arrow-up"}
+                    />
+                </span>
+                <span
                     className={
                         "zotflow-evo-tool" +
                         (scope.subcollections ? " is-on" : "")

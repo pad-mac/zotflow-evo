@@ -6,12 +6,14 @@
  * The fork's reader-view logic lives here so the upstream view files only
  * gain a few calls into this module. See FORK.md.
  */
-import { Platform, setIcon } from "obsidian";
+import { Menu, Platform, setIcon } from "obsidian";
 
 import { workerBridge } from "bridge";
 import { EventBus } from "services/event-bus";
 import { services } from "services/services";
+import { revealInLibrary } from "ui/evo-library/actions";
 import { fireAndForgetIn } from "utils/fire-and-forget";
+import { sanitizePdfFilter } from "utils/evo-pdf-filter";
 
 import type { ItemView, Plugin } from "obsidian";
 import type {
@@ -118,6 +120,7 @@ function noteStripSettings(): ReaderNoteStrip {
         collapsed: settings.readerNoteStripList,
         width: settings.readerNoteStripWidth,
         highlights: settings.readerNoteStripHighlights,
+        pdfFilter: sanitizePdfFilter(settings.readerPdfFilter),
     };
 }
 
@@ -185,9 +188,16 @@ export function connectNoteStrip(
     if (!listening.has(bridge)) {
         listening.add(bridge);
         bridge.onEventType("noteStripChanged", (event) => {
-            const { highlights, width } = event.settings;
+            const { highlights, width, pdfFilter } = event.settings;
             if (typeof highlights === "boolean") {
                 setChromeSetting("readerNoteStripHighlights", highlights);
+            }
+            // The page filter set in one reader: kept, and every reader follows.
+            if (pdfFilter) {
+                services.settings.readerPdfFilter =
+                    sanitizePdfFilter(pdfFilter);
+                chromeChanged.emit();
+                ff(services.saveSettings(), "Failed to save the page filter");
             }
             // Dragged wider or narrower in the reader: every reader follows.
             if (
@@ -278,6 +288,14 @@ class ReaderChromeControls {
             "Hide reader toolbar",
             toggleReaderToolbar,
         );
+        // Only these are shown in the strip's head (not Obsidian's own
+        // buttons, nor "Open source note", which is in the title's menu).
+        for (const el of [
+            this.stripListAction,
+            this.stripAction,
+            this.toolbarAction,
+        ])
+            el.dataset.zfEvoChrome = "1";
         view.register(chromeChanged.subscribe(() => this.apply()));
         view.register(
             readerOpened.subscribe((bridge) => {
@@ -330,22 +348,75 @@ class ReaderChromeControls {
         if (this.withActionListener.has(bridge)) return;
         this.withActionListener.add(bridge);
         bridge.onEventType("noteStripAction", (event) => {
+            const frame = this.view.containerEl.querySelector("iframe");
+            const box = frame?.getBoundingClientRect();
+            const at = {
+                x: (box?.left ?? 0) + event.x,
+                y: (box?.top ?? 0) + event.y,
+            };
+            if (event.id === "title-menu") {
+                this.showTitleMenu(at);
+                return;
+            }
+            if (event.id.startsWith("person:")) {
+                void this.view.app.workspace.openLinkText(
+                    event.id.slice("person:".length),
+                    "",
+                    false,
+                );
+                return;
+            }
             const el = this.view.containerEl.querySelector<HTMLElement>(
                 `.view-actions [data-zf-evo-action="${CSS.escape(event.id)}"]`,
             );
             if (!el) return;
-            const frame = this.view.containerEl.querySelector("iframe");
-            const box = frame?.getBoundingClientRect();
             const win = el.ownerDocument.defaultView ?? window;
             el.dispatchEvent(
                 new win.MouseEvent("click", {
                     bubbles: true,
                     cancelable: true,
-                    clientX: (box?.left ?? 0) + event.x,
-                    clientY: (box?.top ?? 0) + event.y,
+                    clientX: at.x,
+                    clientY: at.y,
                 }),
             );
         });
+    }
+
+    /**
+     * Right-click on the strip's title: the item's source note, and the
+     * item in the library browser.
+     */
+    private showTitleMenu(at: { x: number; y: number }) {
+        const menu = new Menu();
+        const sourceNote = this.view.containerEl.querySelector<HTMLElement>(
+            '.view-action[aria-label="Open source note"]',
+        );
+        if (sourceNote) {
+            menu.addItem((item) =>
+                item
+                    .setTitle("Open source note")
+                    .setIcon("notebook-text")
+                    .onClick(() => sourceNote.click()),
+            );
+        }
+        const subject = this.getSubject();
+        if (subject && "libraryID" in subject) {
+            menu.addItem((item) =>
+                item
+                    .setTitle("Open in library")
+                    .setIcon("library-big")
+                    .onClick(
+                        () =>
+                            void revealInLibrary(
+                                this.view.app,
+                                subject.libraryID,
+                                null,
+                                subject.key,
+                            ),
+                    ),
+            );
+        }
+        menu.showAtPosition(at, this.view.containerEl.ownerDocument);
     }
 
     /** Hide or show the header, and send the strip the buttons to show for it. */

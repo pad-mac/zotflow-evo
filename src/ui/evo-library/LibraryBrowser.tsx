@@ -18,22 +18,35 @@ import { services } from "services/services";
 import {
     addItemsToCollection,
     openAnnotationsTab,
+    openFulltextSearch,
     openBookSearch,
     openCollectionTab,
     openItem,
     setItemsDrag,
 } from "ui/evo-library/actions";
 import { CollectionPane } from "ui/evo-library/CollectionPane";
+import {
+    moveCollection,
+    renameCollection,
+} from "ui/evo-library/collection-edits";
 import { ItemDetails, useItemDetails } from "ui/evo-library/ItemDetails";
 import { ItemTable } from "ui/evo-library/ItemTable";
-import { showCollectionMenu, showItemMenu } from "ui/evo-library/menus";
+import {
+    showCollectionMenu,
+    showItemMenu,
+    showSortMenu,
+} from "ui/evo-library/menus";
 import {
     ANNOTATIONS_ICON,
     ANNOTATIONS_ICON_FALLBACK,
     Icon,
     useLibraryChanges,
 } from "ui/evo-library/parts";
-import { publishSelection, selectionLabel } from "ui/evo-library/selection";
+import {
+    publishScope,
+    publishSelection,
+    selectionLabel,
+} from "ui/evo-library/selection";
 import {
     useRowEditing,
     useScopeRows,
@@ -59,6 +72,12 @@ export interface BrowserControl {
     goTo(target: BrowserTarget | null): void;
     /** Put the cursor in the filter field. */
     focusFilter(): void;
+    /** Show a collection (null: the whole library) with an item selected in it. */
+    reveal(
+        libraryID: number,
+        collectionKey: string | null,
+        itemKey: string,
+    ): void;
 }
 
 function findName(
@@ -154,8 +173,11 @@ export function LibraryBrowser({
     const [orders, setOrders] = useState<Record<string, string[]>>(() => ({
         ...(services.settings.evoCollectionOrder ?? {}),
     }));
+    const [renaming, setRenaming] = useState<string | null>(null);
     const filterRef = useRef<HTMLInputElement>(null);
     const bodyRef = useRef<HTMLDivElement>(null);
+    /** An item to select once its collection's rows are in (reveal()). */
+    const pendingSelect = useRef<string | null>(null);
 
     const loadLibraries = useCallback(() => {
         workerBridge.evoLibrary
@@ -207,9 +229,19 @@ export function LibraryBrowser({
                 input.focus();
                 input.select();
             },
+            reveal(libraryID, collectionKey, itemKey) {
+                revealRef.current(libraryID, collectionKey, itemKey);
+            },
         }),
         [libraries],
     );
+    const revealRef = useRef<
+        (
+            libraryID: number,
+            collectionKey: string | null,
+            itemKey: string,
+        ) => void
+    >(() => {});
 
     const scope = useMemo<EvoScope | null>(
         () =>
@@ -229,6 +261,22 @@ export function LibraryBrowser({
 
     const focused = sel.shown.find((r) => r.key === sel.focusKey) ?? null;
     const details = useItemDetails(detailsShown ? focused : null);
+
+    revealRef.current = (libraryID, collectionKey, itemKey) => {
+        pendingSelect.current = itemKey;
+        setFilter("");
+        setTarget({ libraryID, collectionKey });
+    };
+    // Select the item reveal() asked for once its collection is listed.
+    const selectKey = sel.selectKey;
+    useEffect(() => {
+        const key = pendingSelect.current;
+        if (!key || loading) return;
+        if (selectKey(key)) {
+            pendingSelect.current = null;
+            bodyRef.current?.focus();
+        }
+    }, [rows, loading, selectKey]);
 
     // The item details tab and "save to the selected item" follow this.
     useEffect(() => {
@@ -323,6 +371,9 @@ export function LibraryBrowser({
     };
 
     const name = findName(libraries, target);
+    useEffect(() => {
+        if (target && name) publishScope({ ...target, label: name });
+    }, [target, name]);
 
     return (
         <div
@@ -362,10 +413,35 @@ export function LibraryBrowser({
                                 onSubcollections: setSub,
                                 pinned: id ? pinned.includes(id) : undefined,
                                 onPin: id ? (on) => pin(id, on) : undefined,
+                                onRename: id
+                                    ? () => setRenaming(id)
+                                    : undefined,
                             },
                         );
                     }}
                     onReorder={reorder}
+                    renaming={renaming}
+                    onRenamed={(node, newName) => {
+                        setRenaming(null);
+                        const trimmed = newName?.trim();
+                        if (trimmed && trimmed !== node.name)
+                            void renameCollection(
+                                node.libraryID,
+                                node.key,
+                                trimmed,
+                            );
+                    }}
+                    onMove={(node, parentKey, placed) =>
+                        void moveCollection(
+                            node.libraryID,
+                            node.key,
+                            parentKey,
+                        ).then((ok) => {
+                            if (ok && placed)
+                                reorder(placed.siblings, placed.order);
+                        })
+                    }
+                    indent={services.settings.evoCollectionIndent !== false}
                     onDropItems={(items, collection) =>
                         void addItemsToCollection(
                             items.libraryID,
@@ -407,6 +483,19 @@ export function LibraryBrowser({
                         }}
                     />
                     <span
+                        className="zotflow-evo-tool"
+                        title="Sort by"
+                        onClick={(e) =>
+                            showSortMenu(
+                                e.nativeEvent,
+                                table.sort,
+                                table.setSort,
+                            )
+                        }
+                    >
+                        <Icon name="arrow-up-down" fallback="arrow-down" />
+                    </span>
+                    <span
                         className={
                             "zotflow-evo-tool" +
                             (subcollections ? " is-on" : "")
@@ -428,6 +517,21 @@ export function LibraryBrowser({
                             name={ANNOTATIONS_ICON}
                             fallback={ANNOTATIONS_ICON_FALLBACK}
                         />
+                    </span>
+                    <span
+                        className="zotflow-evo-tool"
+                        title="Search the full text of the documents here"
+                        onClick={() =>
+                            scope &&
+                            void openFulltextSearch(app, [
+                                {
+                                    libraryID: scope.libraryID,
+                                    collectionKey: scope.collectionKey,
+                                },
+                            ])
+                        }
+                    >
+                        <Icon name="text-search" fallback="search" />
                     </span>
                     <span
                         className={
@@ -500,6 +604,17 @@ export function LibraryBrowser({
                             app={app}
                             leaf={leaf}
                             details={details}
+                            onShowInCollection={(
+                                libraryID,
+                                collectionKey,
+                                itemKey,
+                            ) =>
+                                revealRef.current(
+                                    libraryID,
+                                    collectionKey,
+                                    itemKey,
+                                )
+                            }
                             count={sel.selected.size}
                         />
                     </div>
