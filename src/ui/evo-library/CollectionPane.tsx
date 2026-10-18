@@ -6,7 +6,9 @@
  * dragged onto the upper or lower edge of another goes before or after it
  * (ordering siblings, or moving it to that level), onto its middle into it,
  * onto a library to its top level. Items dropped on a collection are added
- * to it. See FORK.md.
+ * to it (with Shift held, moved there from the collection shown). Under each
+ * library its trash: the trashed items, and the trashed collections to
+ * restore. See FORK.md.
  */
 import React, { useEffect, useRef, useState } from "react";
 
@@ -33,6 +35,10 @@ import type {
 export interface CollectionTarget {
     libraryID: number;
     collectionKey: string | null;
+    /** The library's trash (`collectionKey` null). */
+    trash?: boolean;
+    /** A collection that is in the trash. */
+    trashed?: boolean;
 }
 
 export interface CollectionPaneProps {
@@ -47,9 +53,11 @@ export interface CollectionPaneProps {
     onMenu: (target: CollectionTarget, event: React.MouseEvent) => void;
     /** Siblings in a new order: keys, or for the pinned ones collection ids. */
     onReorder: (siblings: string, order: string[]) => void;
+    /** `move`: Shift was held (out of the collection they came from). */
     onDropItems: (
         items: DraggedItems,
         collection: { libraryID: number; key: string; name: string },
+        move: boolean,
     ) => void;
     /**
      * A collection dragged elsewhere: into `parentKey` (null: the top of
@@ -70,6 +78,10 @@ export interface CollectionPaneProps {
     ) => void;
     /** Sub-collections indented under their parents (setting). */
     indent: boolean;
+    /** A collection being created: where (its name is typed in its row). */
+    creating: { libraryID: number; parentKey: string | null } | null;
+    /** The new collection's name, or null when it was given up. */
+    onCreated: (name: string | null) => void;
 }
 
 const MIME_COLLECTION = "application/x-zotflow-evo-collection";
@@ -108,9 +120,11 @@ function placeKey(
 /** The name field of a collection being renamed. */
 function RenameField({
     name,
+    placeholder,
     onDone,
 }: {
     name: string;
+    placeholder?: string;
     onDone: (name: string | null) => void;
 }) {
     const ref = useRef<HTMLInputElement>(null);
@@ -129,6 +143,7 @@ function RenameField({
             ref={ref}
             className="zotflow-evo-coll-rename"
             defaultValue={name}
+            placeholder={placeholder}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
                 e.stopPropagation();
@@ -156,6 +171,8 @@ export function CollectionPane({
     renaming,
     onRenamed,
     indent,
+    creating,
+    onCreated,
 }: CollectionPaneProps) {
     const parents = collectionParents(libraries);
     // Expanded collections (collections start closed) and collapsed libraries.
@@ -178,6 +195,41 @@ export function CollectionPane({
             doc.removeEventListener("drop", clear, true);
         };
     }, []);
+
+    // A sub-collection being created shows under its parent: open it.
+    useEffect(() => {
+        if (!creating?.parentKey) return;
+        const id = collectionId(creating.libraryID, creating.parentKey);
+        setOpen((current) =>
+            current.has(id) ? current : new Set(current).add(id),
+        );
+        setClosedLibraries((current) => {
+            if (!current.has(creating.libraryID)) return current;
+            const next = new Set(current);
+            next.delete(creating.libraryID);
+            return next;
+        });
+    }, [creating]);
+
+    /** The row where a new collection's name is typed. */
+    const draftRow = (depth: number) => (
+        <div
+            key="zotflow-evo-new-collection"
+            className="zotflow-evo-coll is-draft"
+            style={
+                {
+                    "--zotflow-evo-depth": indent ? depth : 0,
+                } as React.CSSProperties
+            }
+        >
+            <span className="zotflow-evo-coll-toggle is-empty" />
+            <RenameField
+                name=""
+                placeholder="New collection"
+                onDone={(name) => onCreated(name?.trim() ? name.trim() : null)}
+            />
+        </div>
+    );
 
     const toggle = (key: string) =>
         setOpen((current) => {
@@ -276,7 +328,7 @@ export function CollectionPane({
                 const library = draggedItemsLibrary(e.dataTransfer);
                 if (library === null || library !== node.libraryID) return;
                 e.preventDefault();
-                e.dataTransfer.dropEffect = "copy";
+                e.dataTransfer.dropEffect = e.shiftKey ? "move" : "copy";
                 if (mark?.row !== row || mark.where !== "into")
                     setMark({ row, where: "into" });
             },
@@ -324,11 +376,15 @@ export function CollectionPane({
                 }
                 const items = readDraggedItems(e.dataTransfer);
                 if (!items || items.libraryID !== node.libraryID) return;
-                onDropItems(items, {
-                    libraryID: node.libraryID,
-                    key: node.key,
-                    name: node.name,
-                });
+                onDropItems(
+                    items,
+                    {
+                        libraryID: node.libraryID,
+                        key: node.key,
+                        name: node.name,
+                    },
+                    e.shiftKey,
+                );
             },
         };
     }
@@ -375,8 +431,11 @@ export function CollectionPane({
         };
     }
 
-    const isCurrent = (libraryID: number, key: string | null) =>
-        !!scope && scope.libraryID === libraryID && scope.collectionKey === key;
+    const isCurrent = (libraryID: number, key: string | null, trash = false) =>
+        !!scope &&
+        scope.libraryID === libraryID &&
+        scope.collectionKey === key &&
+        !!scope.trash === trash;
 
     function renderCollection(
         node: EvoCollectionNode,
@@ -396,6 +455,9 @@ export function CollectionPane({
         const childOrder = children.map((c) => c.key);
         const childSiblings = siblingsId(node.libraryID, node.key);
         const marked = mark?.row === key ? mark.where : null;
+        const draftHere =
+            creating?.libraryID === node.libraryID &&
+            creating.parentKey === node.key;
         return (
             <React.Fragment key={key}>
                 <div
@@ -421,14 +483,16 @@ export function CollectionPane({
                     <span
                         className={
                             "zotflow-evo-coll-toggle" +
-                            (node.children.length ? "" : " is-empty")
+                            (node.children.length || draftHere
+                                ? ""
+                                : " is-empty")
                         }
                         onClick={(e) => {
                             e.stopPropagation();
                             if (node.children.length) toggle(key);
                         }}
                     >
-                        {node.children.length > 0 && (
+                        {(node.children.length > 0 || draftHere) && (
                             <Icon
                                 name={
                                     expanded ? "chevron-down" : "chevron-right"
@@ -448,6 +512,10 @@ export function CollectionPane({
                     )}
                 </div>
                 {expanded &&
+                    creating?.libraryID === node.libraryID &&
+                    creating.parentKey === node.key &&
+                    draftRow(depth + 1)}
+                {expanded &&
                     children.map((child) =>
                         renderCollection(
                             child,
@@ -457,6 +525,93 @@ export function CollectionPane({
                             childOrder,
                         ),
                     )}
+            </React.Fragment>
+        );
+    }
+
+    /** The library's trash, and the collections in it (to restore). */
+    function renderTrash(lib: EvoLibraryNode): React.ReactNode {
+        const id = `trash:${lib.libraryID}`;
+        const expanded = open.has(id);
+        const trashed = lib.trashedCollections ?? [];
+        return (
+            <React.Fragment key={id}>
+                <div
+                    className={
+                        "zotflow-evo-coll is-trash" +
+                        (isCurrent(lib.libraryID, null, true)
+                            ? " is-current"
+                            : "")
+                    }
+                    style={{ "--zotflow-evo-depth": 0 } as React.CSSProperties}
+                    title="Trash"
+                    onClick={() =>
+                        onSelect({
+                            libraryID: lib.libraryID,
+                            collectionKey: null,
+                            trash: true,
+                        })
+                    }
+                    onContextMenu={(e) => e.preventDefault()}
+                >
+                    <span
+                        className={
+                            "zotflow-evo-coll-toggle" +
+                            (trashed.length ? "" : " is-empty")
+                        }
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (trashed.length) toggle(id);
+                        }}
+                    >
+                        {trashed.length > 0 && (
+                            <Icon
+                                name={
+                                    expanded ? "chevron-down" : "chevron-right"
+                                }
+                            />
+                        )}
+                    </span>
+                    <span className="zotflow-evo-coll-icon">
+                        <Icon name="trash-2" />
+                    </span>
+                    <span className="zotflow-evo-coll-name">Trash</span>
+                </div>
+                {expanded &&
+                    trashed.map((node) => {
+                        const target: CollectionTarget = {
+                            libraryID: node.libraryID,
+                            collectionKey: node.key,
+                            trashed: true,
+                        };
+                        return (
+                            <div
+                                key={"trashed:" + node.key}
+                                className={
+                                    "zotflow-evo-coll is-trashed" +
+                                    (isCurrent(node.libraryID, node.key)
+                                        ? " is-current"
+                                        : "")
+                                }
+                                style={
+                                    {
+                                        "--zotflow-evo-depth": 1,
+                                    } as React.CSSProperties
+                                }
+                                title={`${node.name} (in the trash)`}
+                                onClick={() => onSelect(target)}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    onMenu(target, e);
+                                }}
+                            >
+                                <span className="zotflow-evo-coll-toggle is-empty" />
+                                <span className="zotflow-evo-coll-name">
+                                    {node.name}
+                                </span>
+                            </div>
+                        );
+                    })}
             </React.Fragment>
         );
     }
@@ -544,6 +699,10 @@ export function CollectionPane({
                             </span>
                         </div>
                         {!closed &&
+                            creating?.libraryID === lib.libraryID &&
+                            creating.parentKey === null &&
+                            draftRow(0)}
+                        {!closed &&
                             top.map((c) =>
                                 renderCollection(
                                     c,
@@ -553,6 +712,7 @@ export function CollectionPane({
                                     topOrder,
                                 ),
                             )}
+                        {!closed && renderTrash(lib)}
                     </div>
                 );
             })}

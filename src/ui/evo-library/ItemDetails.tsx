@@ -6,7 +6,7 @@
  * when long, and below a line the annotations of the file it opens, which
  * scroll on their own too. See FORK.md.
  */
-import { Keymap } from "obsidian";
+import { Keymap, Menu } from "obsidian";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { workerBridge } from "bridge";
@@ -14,6 +14,7 @@ import { services } from "services/services";
 import {
     openAnnotation,
     openBookSearch,
+    renameAttachmentFile,
     revealInLibrary,
 } from "ui/evo-library/actions";
 import { onSelection, lastSelection } from "ui/evo-library/selection";
@@ -49,6 +50,33 @@ const KIND_ICON: Record<string, string> = {
     link: "link",
     other: "file",
 };
+
+/**
+ * Right-click on a file in the item pane: open it, and (a PDF or EPUB)
+ * rename it from the file name template.
+ */
+function showAttachmentMenu(
+    event: MouseEvent,
+    libraryID: number,
+    attachment: EvoAttachmentInfo,
+    open: () => void,
+) {
+    const menu = new Menu();
+    menu.addItem((item) =>
+        item.setTitle("Open").setIcon("book-open").onClick(open),
+    );
+    if (attachment.kind === "pdf" || attachment.kind === "epub") {
+        menu.addItem((item) =>
+            item
+                .setTitle("Rename file from template")
+                .setIcon("text-cursor-input")
+                .onClick(
+                    () => void renameAttachmentFile(libraryID, attachment.key),
+                ),
+        );
+    }
+    menu.showAtMouseEvent(event);
+}
 
 export interface ItemDetailsProps {
     app: App;
@@ -194,6 +222,15 @@ export function ItemDetails({
                                 }
                                 title={`${KIND_LABEL[a.kind]}: ${a.title}`}
                                 onClick={() => open(a)}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    showAttachmentMenu(
+                                        e.nativeEvent,
+                                        details.libraryID,
+                                        a,
+                                        () => open(a),
+                                    );
+                                }}
                             >
                                 <Icon
                                     name={KIND_ICON[a.kind] ?? "file"}

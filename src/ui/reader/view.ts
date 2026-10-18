@@ -31,6 +31,7 @@ import {
     connectNoteStrip,
     readerChromeOptions,
     requestReaderThemeRefresh,
+    stripOnlyChromeOptions,
 } from "ui/reader/chrome";
 import type { NoteStripSubject } from "ui/reader/chrome";
 import { noteLocalEdit } from "services/evo-auto-sync";
@@ -80,6 +81,9 @@ export class ZoteroReaderView extends ItemView {
 
     constructor(leaf: WorkspaceLeaf) {
         super(leaf);
+        // ZotFlow Evo: the annotation strip tab (ui/evo-strip) shows the
+        // note strip alone, without the header buttons.
+        if (this.evoStripOnly()) return;
         this.addAction(
             "notebook-text",
             "Open source note",
@@ -91,6 +95,48 @@ export class ZoteroReaderView extends ItemView {
             () => this.bridge,
             () => this.noteStripSubject(),
         );
+    }
+
+    /**
+     * ZotFlow Evo: true in the annotation strip tab (`EvoStripView`): the
+     * reader shows its note strip alone, and this view keeps nothing of the
+     * reading position.
+     */
+    protected evoStripOnly(): boolean {
+        return false;
+    }
+
+    /** ZotFlow Evo: the attachment shown, for a subclass. */
+    protected get evoAttachment(): IDBZoteroItem<AttachmentData> | undefined {
+        return this.attachmentItem;
+    }
+
+    /** ZotFlow Evo: the reader has opened its document (for a subclass). */
+    protected evoReaderOpened(bridge: IframeReaderBridge): void {}
+
+    /** ZotFlow Evo: close the document shown (for a subclass). */
+    protected async evoCloseDocument(): Promise<void> {
+        await this.teardownReader();
+        this.attachmentItem = undefined as unknown as IDBZoteroItem<AttachmentData>;
+    }
+
+    /** ZotFlow Evo: set while this view tells the others of its own annotation edit. */
+    private evoTelling = false;
+
+    /** ZotFlow Evo: other views of the same attachment (a strip tab, a reader) read the edit. */
+    private evoTellOthers(annotationKey: string) {
+        const item = this.attachmentItem;
+        if (!item) return;
+        this.evoTelling = true;
+        try {
+            services.eventHub.annotationChanged.emit(
+                item.libraryID,
+                annotationKey,
+                item.key,
+            );
+        } finally {
+            this.evoTelling = false;
+        }
     }
 
     /** ZotFlow Evo: the item the line above the note strip describes. */
@@ -167,8 +213,11 @@ export class ZoteroReaderView extends ItemView {
 
         // Single-instance guard: reveal an existing reader for this attachment
         // and close the duplicate leaf before any async work starts.
+        // (ZotFlow Evo: not for the annotation strip, which may show an
+        // attachment open in a reader too.)
         const key = this.readerKey(state);
-        const existing = this.findExistingReaderLeaf(state);
+        const stripOnly = this.evoStripOnly();
+        const existing = stripOnly ? null : this.findExistingReaderLeaf(state);
         if (existing && existing !== this.leaf) {
             services.logService.warn(
                 `Attachment ${key} is already open; reusing existing reader leaf`,
@@ -189,7 +238,7 @@ export class ZoteroReaderView extends ItemView {
             return;
         }
 
-        openingReaders.set(key, this.leaf);
+        if (!stripOnly) openingReaders.set(key, this.leaf);
         try {
             // Obsidian calls setState again on an open view (history, layout
             // restore, a link to the same attachment). If this document is
@@ -294,8 +343,9 @@ export class ZoteroReaderView extends ItemView {
         const loadingEl = container.createDiv({ cls: "zotflow-loading" });
         loadingEl.setText(`Downloading/Loading ${this.attachmentItem.key}...`);
 
-        // Try force update the source note
-        workerBridge.libraryNote
+        // Try force update the source note (ZotFlow Evo: not from the
+        // annotation strip, which changes item with every line).
+        if (!this.evoStripOnly()) workerBridge.libraryNote
             .triggerUpdate(
                 this.attachmentItem.libraryID,
                 this.attachmentItem.parentItem !== ""
@@ -564,14 +614,18 @@ export class ZoteroReaderView extends ItemView {
                 services.settings.autoDisableNoteImageTextTools;
             const opts: Partial<CreateReaderOptions> = {
                 annotations: annotationJson,
-                primaryViewState: savedViewState?.primaryViewState,
+                primaryViewState: this.evoStripOnly()
+                    ? undefined
+                    : savedViewState?.primaryViewState,
                 colorScheme: this.colorScheme,
                 customThemes: services.viewStateService.getCustomThemes(),
                 autoDisableNoteTool: autoDisable,
                 autoDisableTextTool: autoDisable,
                 autoDisableImageTool: autoDisable,
                 fontFamily: services.settings.epubFontFamily || undefined,
-                ...readerChromeOptions(),
+                ...(this.evoStripOnly()
+                    ? stripOnlyChromeOptions()
+                    : readerChromeOptions()),
                 // ZotFlow Evo: open where a link pointed, not where reading stopped.
                 ...(this.pendingNavigation
                     ? { location: this.pendingNavigation }
@@ -626,6 +680,7 @@ export class ZoteroReaderView extends ItemView {
             // ZotFlow Evo: the line above the note strip; a link that arrived
             // while the document was opening.
             connectNoteStrip(this.bridge, this.noteStripSubject());
+            this.evoReaderOpened(this.bridge);
             this.finishPendingNavigation(opts.location);
 
             // Subscribe to sync events for live annotation updates
@@ -735,6 +790,9 @@ export class ZoteroReaderView extends ItemView {
      */
     private handleViewStateChanged(state: unknown, primary: boolean) {
         if (!this.attachmentItem) return;
+        // ZotFlow Evo: the annotation strip's hidden pages are not where
+        // the user reads.
+        if (this.evoStripOnly()) return;
 
         services.viewStateService.saveViewState(
             ViewStateService.remoteKey(
@@ -815,6 +873,7 @@ export class ZoteroReaderView extends ItemView {
         this.unsubscribeAnnotationChanged =
             services.eventHub.annotationChanged.subscribe(
                 (libraryID, _annotationKey, parentItemKey) => {
+                    if (this.evoTelling) return;
                     if (libraryID !== this.attachmentItem.libraryID) return;
                     if (parentItemKey !== this.attachmentItem.key) return;
 
@@ -951,8 +1010,12 @@ export class ZoteroReaderView extends ItemView {
             );
         }
 
-        // ZotFlow Evo: upload shortly after the last change.
-        if (annotations.length) noteLocalEdit(this.attachmentItem.libraryID);
+        // ZotFlow Evo: upload shortly after the last change; other views of
+        // this attachment read it.
+        if (annotations.length) {
+            noteLocalEdit(this.attachmentItem.libraryID);
+            this.evoTellOthers(annotations[0]!.id);
+        }
 
         // Auto-copy newly created annotations (creation only — skips edits).
         const created = annotations.filter(
@@ -999,8 +1062,12 @@ export class ZoteroReaderView extends ItemView {
                 "Failed to delete annotations",
             );
         }
-        // ZotFlow Evo: upload shortly after the last change.
-        if (ids.length) noteLocalEdit(this.attachmentItem.libraryID);
+        // ZotFlow Evo: upload shortly after the last change; other views of
+        // this attachment read it.
+        if (ids.length) {
+            noteLocalEdit(this.attachmentItem.libraryID);
+            this.evoTellOthers(ids[0]!);
+        }
     }
 
     /**

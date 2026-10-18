@@ -9,10 +9,12 @@ import { Liquid } from "liquidjs";
 import { db, getCombinations } from "db/db";
 import { getAnnotationJson } from "db/annotation";
 import { mutateItems } from "db/mutate";
+import { normalizeCollection } from "db/normalize";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import {
     DEFAULT_ATTACH_FILENAME,
     attachmentKind,
+    attachmentRename,
     bestKind,
     choosePrimaryAttachment,
     creatorSummary,
@@ -30,8 +32,10 @@ import type { LibraryService } from "./library";
 import type { IParentProxy } from "bridge/types";
 import type { ZotFlowSettings } from "settings/types";
 import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
+import type { ZoteroCollection } from "types/zotero";
 import type { AnnotationJSON } from "types/zotero-reader";
 import type {
+    AttachmentFileFacts,
     AttachmentKind,
     CreatorFacts,
     EvoAnnotatedItem,
@@ -52,6 +56,8 @@ export interface EvoLibraryNode {
     libraryID: number;
     name: string;
     collections: EvoCollectionNode[];
+    /** Collections in the trash whose parent is not: what the trash lists. */
+    trashedCollections: EvoCollectionNode[];
 }
 
 /** What the table lists: a whole library, or one collection (with or without the ones inside it). */
@@ -60,6 +66,8 @@ export interface EvoScope {
     /** null: the whole library. */
     collectionKey: string | null;
     subcollections: boolean;
+    /** The library's trash (its trashed items); `collectionKey` is then null. */
+    trash?: boolean;
 }
 
 /** An attachment as the details pane lists it. */
@@ -311,6 +319,151 @@ export class EvoLibraryService {
         this.parentHost?.emit("treeChanged");
     }
 
+    /**
+     * Collections Zotero took a write of (created, trashed, restored): kept
+     * here as Zotero answered, at once. The next sync brings the same.
+     */
+    async collectionsWritten(
+        libraryID: number,
+        written: ZoteroCollection[],
+    ): Promise<void> {
+        if (!written.length) return;
+        await db.collections.bulkPut(
+            written.map((c) => normalizeCollection(c, libraryID)),
+        );
+        this.parentHost?.emit("treeChanged");
+    }
+
+    /**
+     * A collection, every collection inside it, and the collections it is
+     * in (nearest first), each with its version and whether it is in the
+     * trash: what trashing or restoring it writes.
+     */
+    async collectionFamily(
+        libraryID: number,
+        key: string,
+    ): Promise<{
+        self: { key: string; name: string; version: number; trashed: boolean };
+        descendants: { key: string; version: number; trashed: boolean }[];
+        ancestors: { key: string; version: number; trashed: boolean }[];
+    } | null> {
+        const all = await db.collections
+            .where(["libraryID", "trashed"])
+            .anyOf([
+                [libraryID, 0],
+                [libraryID, 1],
+            ])
+            .toArray();
+        const byKey = new Map(all.map((c) => [c.key, c]));
+        const self = byKey.get(key);
+        if (!self) return null;
+        const brief = (c: IDBZoteroCollection) => ({
+            key: c.key,
+            version: c.version,
+            trashed: !!c.trashed,
+        });
+        const children = new Map<string, IDBZoteroCollection[]>();
+        for (const c of all) {
+            if (!c.parentCollection) continue;
+            const list = children.get(c.parentCollection) ?? [];
+            list.push(c);
+            children.set(c.parentCollection, list);
+        }
+        const descendants: IDBZoteroCollection[] = [];
+        const seen = new Set([key]);
+        const walk = (k: string) => {
+            for (const c of children.get(k) ?? []) {
+                if (seen.has(c.key)) continue;
+                seen.add(c.key);
+                descendants.push(c);
+                walk(c.key);
+            }
+        };
+        walk(key);
+        const ancestors: IDBZoteroCollection[] = [];
+        for (
+            let p = byKey.get(self.parentCollection);
+            p && !seen.has(p.key);
+            p = byKey.get(p.parentCollection)
+        ) {
+            seen.add(p.key);
+            ancestors.push(p);
+        }
+        return {
+            self: { ...brief(self), name: self.name },
+            descendants: descendants.map(brief),
+            ancestors: ancestors.map(brief),
+        };
+    }
+
+    /**
+     * Rename an attachment's file from the file name template (as for a file
+     * saved to its item), as Zotero renames one: its `filename` changes, and
+     * every Zotero client renames its copy when it syncs that.
+     */
+    async renameAttachmentFile(
+        libraryID: number,
+        key: string,
+    ): Promise<{ status: "renamed" | "same"; name: string; problem?: string }> {
+        await this.assertWritable(libraryID);
+        const attachment = await db.items.get([libraryID, key]);
+        if (!attachment || attachment.itemType !== "attachment")
+            throw new ZotFlowError(
+                ZotFlowErrorCode.UNKNOWN,
+                "EvoLibraryService",
+                "The attachment is not here (any more).",
+            );
+        const parentKey = attachment.parentItem || attachment.key;
+        const { name, problem } = await this.attachFilename(
+            libraryID,
+            parentKey,
+        );
+        const data = attachment.raw.data as AttachmentFileFacts;
+        const change = attachmentRename(data, name);
+        if (change === null)
+            return { status: "same", name: data.filename ?? name, problem };
+        if ("refused" in change)
+            throw new ZotFlowError(
+                ZotFlowErrorCode.UNKNOWN,
+                "EvoLibraryService",
+                change.refused,
+            );
+        const [written] = await mutateItems(libraryID, [
+            {
+                key,
+                edit: (d: object) => {
+                    const fields = d as Record<string, unknown>;
+                    fields.filename = change.filename;
+                    if (change.title !== undefined) fields.title = change.title;
+                },
+            },
+        ]);
+        if (!written)
+            throw new ZotFlowError(
+                ZotFlowErrorCode.UNKNOWN,
+                "EvoLibraryService",
+                "The attachment is not here (any more).",
+            );
+        // The copy kept here goes by the new name too (bookkeeping only).
+        await db.files
+            .update([libraryID, key], { fileName: change.filename })
+            .catch(() => 0);
+        this.parentHost?.emit("treeChanged");
+        return { status: "renamed", name: change.filename, problem };
+    }
+
+    /** Bring items back from the trash. */
+    async restoreItems(
+        libraryID: number,
+        keys: string[],
+    ): Promise<EvoEditResult> {
+        return this.editItems(libraryID, keys, (data) => {
+            if (!data.deleted) return false;
+            delete data.deleted;
+            return true;
+        });
+    }
+
     private readonly filenameEngine = new Liquid({ greedy: false });
 
     /**
@@ -369,11 +522,15 @@ export class EvoLibraryService {
     /** The libraries shown in ZotFlow, with their collections nested and sorted by name. */
     async getCollectionTree(): Promise<EvoLibraryNode[]> {
         const ids = await this.library.getActiveLibraryIDs();
-        const [libraries, collections] = await Promise.all([
+        const [libraries, collections, trashed] = await Promise.all([
             db.libraries.where("id").anyOf(ids).toArray(),
             db.collections
                 .where(["libraryID", "trashed"])
                 .anyOf(getCombinations([ids, [0]]))
+                .toArray(),
+            db.collections
+                .where(["libraryID", "trashed"])
+                .anyOf(getCombinations([ids, [1]]))
                 .toArray(),
         ]);
         const out: EvoLibraryNode[] = [];
@@ -390,20 +547,37 @@ export class EvoLibraryService {
                 });
             }
             const roots: EvoCollectionNode[] = [];
+            // Inside a trashed collection: in the trash with it (not shown).
+            const inTrash = new Set(
+                trashed.filter((c) => c.libraryID === id).map((c) => c.key),
+            );
             for (const c of own) {
                 const node = nodes.get(c.key)!;
                 const parent = c.parentCollection
                     ? nodes.get(c.parentCollection)
                     : undefined;
-                (parent ? parent.children : roots).push(node);
+                if (parent) parent.children.push(node);
+                else if (!inTrash.has(c.parentCollection)) roots.push(node);
             }
             const sort = (list: EvoCollectionNode[]) => {
                 list.sort((a, b) => collator.compare(a.name, b.name));
                 list.forEach((n) => sort(n.children));
             };
             sort(roots);
+            const ownTrashed = trashed.filter((c) => c.libraryID === id);
+            const trashedKeys = new Set(ownTrashed.map((c) => c.key));
+            const trashedTop = ownTrashed
+                .filter((c) => !trashedKeys.has(c.parentCollection))
+                .map((c): EvoCollectionNode => ({
+                    libraryID: id,
+                    key: c.key,
+                    name: c.name,
+                    children: [],
+                }));
+            sort(trashedTop);
             out.push({
                 libraryID: id,
+                trashedCollections: trashedTop,
                 name:
                     lib?.type === "user"
                         ? "My Library"
@@ -452,6 +626,18 @@ export class EvoLibraryService {
     /** The top-level items (not attachments or notes under an item) of a scope. */
     private async topLevelItems(scope: EvoScope): Promise<AnyIDBZoteroItem[]> {
         const { libraryID } = scope;
+        const notesAccess = await this.library.hasNotesAccess(libraryID);
+        if (scope.trash) {
+            const types = Zotero_Item_Types.filter((t) => t !== "annotation");
+            return (
+                await db.items
+                    .where(["libraryID", "itemType", "trashed"])
+                    .anyOf(getCombinations([[libraryID], types, [1]]))
+                    .toArray()
+            ).filter(
+                (i) => !i.parentItem && (notesAccess || i.itemType !== "note"),
+            );
+        }
         let items: AnyIDBZoteroItem[];
         if (scope.collectionKey === null) {
             const types = Zotero_Item_Types.filter((t) => t !== "annotation");
@@ -477,13 +663,12 @@ export class EvoLibraryService {
                 return true;
             });
         }
-        const notes = await this.library.hasNotesAccess(libraryID);
         return items.filter(
             (i) =>
                 i.trashed === 0 &&
                 !i.parentItem &&
                 i.itemType !== "annotation" &&
-                (notes || i.itemType !== "note"),
+                (notesAccess || i.itemType !== "note"),
         );
     }
 
@@ -669,15 +854,16 @@ export class EvoLibraryService {
             scope.libraryID,
             items,
         );
-        const name =
-            scope.collectionKey === null
-                ? "Library"
-                : ((
-                      await db.collections.get([
-                          scope.libraryID,
-                          scope.collectionKey,
-                      ])
-                  )?.name ?? "Collection");
+        const name = scope.trash
+            ? "Trash"
+            : scope.collectionKey === null
+              ? "Library"
+              : ((
+                    await db.collections.get([
+                        scope.libraryID,
+                        scope.collectionKey,
+                    ])
+                )?.name ?? "Collection");
         const outItems: EvoAnnotatedItem[] = [];
         const annotations: EvoCollectionAnnotation[] = [];
         for (const item of items) {

@@ -17,17 +17,22 @@ import { workerBridge } from "bridge";
 import { services } from "services/services";
 import {
     addItemsToCollection,
+    moveItemsToCollection,
     openAnnotationsTab,
     openFulltextSearch,
     openBookSearch,
     openCollectionTab,
     openItem,
+    restoreItems,
     setItemsDrag,
 } from "ui/evo-library/actions";
 import { CollectionPane } from "ui/evo-library/CollectionPane";
 import {
+    createCollection,
     moveCollection,
     renameCollection,
+    restoreCollection,
+    trashCollection,
 } from "ui/evo-library/collection-edits";
 import { ItemDetails, useItemDetails } from "ui/evo-library/ItemDetails";
 import { ItemTable } from "ui/evo-library/ItemTable";
@@ -87,6 +92,7 @@ function findName(
     if (!target) return "";
     const lib = libraries.find((l) => l.libraryID === target.libraryID);
     if (!lib) return "";
+    if (target.trash) return `Trash — ${lib.name}`;
     if (target.collectionKey === null) return lib.name;
     const walk = (nodes: EvoCollectionNode[]): string | null => {
         for (const n of nodes) {
@@ -96,7 +102,7 @@ function findName(
         }
         return null;
     };
-    return walk(lib.collections) ?? "";
+    return walk(lib.collections) ?? walk(lib.trashedCollections ?? []) ?? "";
 }
 
 function saveSettings() {
@@ -174,6 +180,10 @@ export function LibraryBrowser({
         ...(services.settings.evoCollectionOrder ?? {}),
     }));
     const [renaming, setRenaming] = useState<string | null>(null);
+    const [creating, setCreating] = useState<{
+        libraryID: number;
+        parentKey: string | null;
+    } | null>(null);
     const filterRef = useRef<HTMLInputElement>(null);
     const bodyRef = useRef<HTMLDivElement>(null);
     /** An item to select once its collection's rows are in (reveal()). */
@@ -248,8 +258,9 @@ export function LibraryBrowser({
             target
                 ? {
                       libraryID: target.libraryID,
-                      collectionKey: target.collectionKey,
+                      collectionKey: target.trash ? null : target.collectionKey,
                       subcollections,
+                      trash: !!target.trash,
                   }
                 : null,
         [target, subcollections],
@@ -367,13 +378,22 @@ export function LibraryBrowser({
             sel.selected.has(row.key) && sel.selectedRows.length > 1
                 ? sel.selectedRows
                 : [row];
-        if (!setItemsDrag(event.dataTransfer, items)) event.preventDefault();
+        const from = scope && !scope.trash ? scope.collectionKey : null;
+        if (!setItemsDrag(event.dataTransfer, items, from))
+            event.preventDefault();
     };
 
     const name = findName(libraries, target);
     useEffect(() => {
-        if (target && name) publishScope({ ...target, label: name });
+        // The trash is no place to save new items to.
+        if (target && name && !target.trash)
+            publishScope({
+                libraryID: target.libraryID,
+                collectionKey: target.collectionKey,
+                label: name,
+            });
     }, [target, name]);
+    const inTrash = !!scope?.trash;
 
     return (
         <div
@@ -404,19 +424,63 @@ export function LibraryBrowser({
                             t.collectionKey === null
                                 ? null
                                 : collectionId(t.libraryID, t.collectionKey);
+                        const key = t.collectionKey;
                         showCollectionMenu(
                             app,
-                            { ...t, subcollections },
-                            e.nativeEvent,
                             {
+                                libraryID: t.libraryID,
+                                collectionKey: t.collectionKey,
                                 subcollections,
-                                onSubcollections: setSub,
-                                pinned: id ? pinned.includes(id) : undefined,
-                                onPin: id ? (on) => pin(id, on) : undefined,
-                                onRename: id
-                                    ? () => setRenaming(id)
-                                    : undefined,
                             },
+                            e.nativeEvent,
+                            t.trashed && key
+                                ? {
+                                      subcollections,
+                                      onSubcollections: setSub,
+                                      onRestore: () =>
+                                          void restoreCollection(
+                                              t.libraryID,
+                                              key,
+                                          ),
+                                  }
+                                : {
+                                      subcollections,
+                                      onSubcollections: setSub,
+                                      pinned: id
+                                          ? pinned.includes(id)
+                                          : undefined,
+                                      onPin: id
+                                          ? (on) => pin(id, on)
+                                          : undefined,
+                                      onRename: id
+                                          ? () => setRenaming(id)
+                                          : undefined,
+                                      onNewCollection: () =>
+                                          setCreating({
+                                              libraryID: t.libraryID,
+                                              parentKey: key,
+                                          }),
+                                      onTrash: key
+                                          ? () =>
+                                                void trashCollection(
+                                                    t.libraryID,
+                                                    key,
+                                                ).then((ok) => {
+                                                    // Its items are still listed;
+                                                    // the library is shown instead.
+                                                    if (
+                                                        ok &&
+                                                        target?.collectionKey ===
+                                                            key
+                                                    )
+                                                        setTarget({
+                                                            libraryID:
+                                                                t.libraryID,
+                                                            collectionKey: null,
+                                                        });
+                                                })
+                                          : undefined,
+                                  },
                         );
                     }}
                     onReorder={reorder}
@@ -442,14 +506,39 @@ export function LibraryBrowser({
                         })
                     }
                     indent={services.settings.evoCollectionIndent !== false}
-                    onDropItems={(items, collection) =>
-                        void addItemsToCollection(
-                            items.libraryID,
-                            items.keys,
-                            collection.key,
-                            collection.name,
-                        )
+                    onDropItems={(items, collection, move) =>
+                        void (move && items.fromCollection
+                            ? moveItemsToCollection(
+                                  items.libraryID,
+                                  items.keys,
+                                  items.fromCollection,
+                                  collection.key,
+                                  collection.name,
+                              )
+                            : addItemsToCollection(
+                                  items.libraryID,
+                                  items.keys,
+                                  collection.key,
+                                  collection.name,
+                              ))
                     }
+                    creating={creating}
+                    onCreated={(newName) => {
+                        const at = creating;
+                        setCreating(null);
+                        if (!at || !newName) return;
+                        void createCollection(
+                            at.libraryID,
+                            newName,
+                            at.parentKey,
+                        ).then((key) => {
+                            if (key)
+                                setTarget({
+                                    libraryID: at.libraryID,
+                                    collectionKey: key,
+                                });
+                        });
+                    }}
                 />
             </div>
             <div
@@ -506,33 +595,37 @@ export function LibraryBrowser({
                     >
                         <Icon name="folder-tree" />
                     </span>
-                    <span
-                        className="zotflow-evo-tool"
-                        title="Show the annotations of this collection"
-                        onClick={() =>
-                            scope && void openAnnotationsTab(app, scope)
-                        }
-                    >
-                        <Icon
-                            name={ANNOTATIONS_ICON}
-                            fallback={ANNOTATIONS_ICON_FALLBACK}
-                        />
-                    </span>
-                    <span
-                        className="zotflow-evo-tool"
-                        title="Search the full text of the documents here"
-                        onClick={() =>
-                            scope &&
-                            void openFulltextSearch(app, [
-                                {
-                                    libraryID: scope.libraryID,
-                                    collectionKey: scope.collectionKey,
-                                },
-                            ])
-                        }
-                    >
-                        <Icon name="text-search" fallback="search" />
-                    </span>
+                    {!inTrash && (
+                        <span
+                            className="zotflow-evo-tool"
+                            title="Show the annotations of this collection"
+                            onClick={() =>
+                                scope && void openAnnotationsTab(app, scope)
+                            }
+                        >
+                            <Icon
+                                name={ANNOTATIONS_ICON}
+                                fallback={ANNOTATIONS_ICON_FALLBACK}
+                            />
+                        </span>
+                    )}
+                    {!inTrash && (
+                        <span
+                            className="zotflow-evo-tool"
+                            title="Search the full text of the documents here"
+                            onClick={() =>
+                                scope &&
+                                void openFulltextSearch(app, [
+                                    {
+                                        libraryID: scope.libraryID,
+                                        collectionKey: scope.collectionKey,
+                                    },
+                                ])
+                            }
+                        >
+                            <Icon name="text-search" fallback="search" />
+                        </span>
+                    )}
                     <span
                         className={
                             "zotflow-evo-tool" + (detailsShown ? " is-on" : "")
@@ -562,7 +655,9 @@ export function LibraryBrowser({
                             ? "Loading…"
                             : filter
                               ? "Nothing matches the filter."
-                              : "No items."
+                              : inTrash
+                                ? "The trash is empty."
+                                : "No items."
                     }
                     onSort={table.toggleSort}
                     onColumns={table.setColumns}
@@ -578,17 +673,35 @@ export function LibraryBrowser({
                                 metaKey: false,
                                 shiftKey: false,
                             });
-                        showItemMenu(app, leaf, row, e.nativeEvent, {
-                            onRemove:
-                                scope?.collectionKey != null
-                                    ? () => editing.ask(false)
-                                    : undefined,
-                            onTrash: () => editing.ask(true),
-                        });
+                        showItemMenu(
+                            app,
+                            leaf,
+                            row,
+                            e.nativeEvent,
+                            inTrash
+                                ? {
+                                      onRestore: () =>
+                                          void restoreItems(
+                                              row.libraryID,
+                                              sel.selected.has(row.key)
+                                                  ? sel.selectedRows.map(
+                                                        (r) => r.key,
+                                                    )
+                                                  : [row.key],
+                                          ),
+                                  }
+                                : {
+                                      onRemove:
+                                          scope?.collectionKey != null
+                                              ? () => editing.ask(false)
+                                              : undefined,
+                                      onTrash: () => editing.ask(true),
+                                  },
+                        );
                     }}
                     onDragRows={dragRows}
                     onSearch={(row) => void openBookSearch(app, leaf, row)}
-                    onDeleteKey={editing.ask}
+                    onDeleteKey={inTrash ? () => {} : editing.ask}
                     onPromptConfirm={editing.confirm}
                     onPromptCancel={editing.cancel}
                 />

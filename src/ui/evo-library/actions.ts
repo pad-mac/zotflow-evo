@@ -364,6 +364,8 @@ const EVO_LIBRARY_MIME = "application/x-zotflow-evo-library-";
 export interface DraggedItems {
     libraryID: number;
     keys: string[];
+    /** The collection they were dragged out of (a Shift+drop moves them from it). */
+    fromCollection?: string | null;
 }
 
 /**
@@ -379,12 +381,18 @@ export function setItemsDrag(
         itemType: string;
         title: string;
     }[],
+    fromCollection: string | null = null,
 ): number {
     if (!items.length) return 0;
     const libraryID = items[0]!.libraryID;
     const own = items.filter((i) => i.libraryID === libraryID);
-    const carried: DraggedItems = { libraryID, keys: own.map((i) => i.key) };
-    dataTransfer.effectAllowed = "copy";
+    const carried: DraggedItems = {
+        libraryID,
+        keys: own.map((i) => i.key),
+        fromCollection,
+    };
+    // A copy into a collection or a note; a move (Shift) between collections.
+    dataTransfer.effectAllowed = "copyMove";
     dataTransfer.setData(EVO_ITEMS_MIME, JSON.stringify(carried));
     dataTransfer.setData(EVO_LIBRARY_MIME + libraryID, "");
     const linked = items.filter((i) => hasSourceNote(i.itemType));
@@ -430,6 +438,10 @@ export function readDraggedItems(
         return {
             libraryID: parsed.libraryID,
             keys: parsed.keys.filter((k): k is string => typeof k === "string"),
+            fromCollection:
+                typeof parsed.fromCollection === "string"
+                    ? parsed.fromCollection
+                    : null,
         };
     } catch {
         return null;
@@ -476,6 +488,81 @@ export async function addItemsToCollection(
         );
     } catch (e) {
         editFailed("add to the collection", e);
+    }
+}
+
+/**
+ * Move items from one collection to another (a Shift+drop): added to the
+ * new one, then taken out of the old one.
+ */
+export async function moveItemsToCollection(
+    libraryID: number,
+    keys: string[],
+    from: string,
+    to: string,
+    toName: string,
+): Promise<void> {
+    if (from === to) return;
+    try {
+        const added = await workerBridge.evoLibrary.addToCollection(
+            libraryID,
+            keys,
+            to,
+        );
+        const removed = await workerBridge.evoLibrary.removeFromCollection(
+            libraryID,
+            keys,
+            from,
+        );
+        if (added.changed || removed.changed) noteLocalEdit(libraryID);
+        services.notificationService.notify(
+            "info",
+            `Moved ${items(keys.length)} to “${toName}”.`,
+        );
+    } catch (e) {
+        editFailed("move to the collection", e);
+    }
+}
+
+/**
+ * Rename an attachment's file from the file name template (the item pane's
+ * attachment menu). The new name reaches Zotero with the next sync.
+ */
+export async function renameAttachmentFile(
+    libraryID: number,
+    key: string,
+): Promise<void> {
+    try {
+        const result = await workerBridge.evoLibrary.renameAttachmentFile(
+            libraryID,
+            key,
+        );
+        if (result.status === "renamed") noteLocalEdit(libraryID);
+        services.notificationService.notify(
+            result.problem ? "warning" : "info",
+            (result.status === "renamed"
+                ? `Renamed the file to “${result.name}”.`
+                : `The file is already called “${result.name}”.`) +
+                (result.problem ? ` ${result.problem}` : ""),
+        );
+    } catch (e) {
+        editFailed("rename the file", e);
+    }
+}
+
+/** Bring items back from the trash. */
+export async function restoreItems(
+    libraryID: number,
+    keys: string[],
+): Promise<void> {
+    try {
+        const result = await workerBridge.evoLibrary.restoreItems(
+            libraryID,
+            keys,
+        );
+        if (result.changed) noteLocalEdit(libraryID);
+    } catch (e) {
+        editFailed("restore from the trash", e);
     }
 }
 

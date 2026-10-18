@@ -178,22 +178,16 @@ function SnippetView({
     onOpen: () => void;
 }) {
     // The lines around the first match in view: it stands in the middle,
-    // the lines before and after fade out.
+    // whole lines above and below it.
     const textRef = useRef<HTMLDivElement>(null);
     useLayoutEffect(() => {
         const box = textRef.current;
         const mark = box?.querySelector("mark");
         if (!box || !mark) return;
-        box.scrollTop = Math.max(
-            0,
-            mark.offsetTop - (box.clientHeight - mark.offsetHeight) / 2,
-        );
-        // Fade only where there is more text.
-        box.classList.toggle("is-cut-top", box.scrollTop > 1);
-        box.classList.toggle(
-            "is-cut-bottom",
-            box.scrollTop + box.clientHeight < box.scrollHeight - 1,
-        );
+        const line = parseFloat(getComputedStyle(box).lineHeight) || 20;
+        const centred =
+            mark.offsetTop - (box.clientHeight - mark.offsetHeight) / 2;
+        box.scrollTop = Math.max(0, Math.round(centred / line) * line);
     }, [snippet]);
     return (
         <div className="zotflow-evo-fts-snippet" onClick={onOpen}>
@@ -270,7 +264,8 @@ function HitView({
                     className="zotflow-evo-fts-more"
                     onClick={() => setAll(true)}
                 >
-                    {more} more in this document
+                    <Icon name="chevrons-down" />
+                    <span>{more} more in this document</span>
                 </div>
             )}
         </>

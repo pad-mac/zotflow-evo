@@ -68,7 +68,18 @@ Keep this list complete. One entry per change, newest last.
 | Opening a document at a search: a navigation with `evoFind` (`{ query, caseSensitive, entireWord }`) opens the reader's find bar with it, also when the document was closed | `finishPendingNavigation()` in `src/ui/reader/view.ts`; the reader's adapter (below) | For the full-text search. |
 | Quiet syncs: an optional `quiet` flag from `startSync()` down to `SyncService.startSync()` suppresses the "Sync completed successfully!" notice | `src/ui/start-sync.ts`, `src/bridge/index.ts`, `src/worker/worker.ts`, `src/worker/tasks/manager.ts`, `src/worker/tasks/impl/sync-task.ts`, `src/worker/services/sync.ts` (one parameter each) | Automatic syncs run often; only their failures are reported. |
 
-Known limits and open checks of these (as of 1.7.1-beta.8):
+| Hooks for other plugins (beta.9): every change to what a collection holds — items added or taken out (top-level, not trashed; a trash counts as taken out), the collection itself created, renamed, moved, trashed or deleted — is told to other plugins (kanban-evo) as the workspace event `zotflow-evo:collections-changed` and through `app.plugins.plugins["zotflow-evo"].api.onCollectionsChanged()`. See "Hooks for other plugins" | `src/worker/services/evo-collection-watch.ts` (new: Dexie hooks on `items` and `collections`, gathered for 250 ms); started in `src/worker/worker.ts`; the `collectionsChanged` event and `CollectionChange` in `src/services/event-hub.ts`; `src/services/evo-api.ts` (new); `registerEvoApi()` in `src/main.ts` | Requested for kanban-evo's per-board collection inbox. On the database itself, so sync, edits here and collection writes all count. |
+| Annotation strip tab (beta.9): the reader's note strip alone in a tab (command "Open annotation strip"), for the item of the line the cursor is on in another pane: the first link on that line to a source note, else the note itself if it is a source note; a line without one leaves it as it is. It shows the annotations of the item's first attachment (the one a double click opens, else the first of the best kind), PDF or snapshot. Same entries, editing, colours, drags and notes under an entry as beside a PDF; in the head only the colour filters and the highlights button. The page number (or Ctrl/Cmd+click) opens the place in a reader; the title's right-click menu opens the source note, the reader, the item in the library. See "Annotation strip tab" | `src/ui/evo-strip/strip-view.ts` (new: `EvoStripView`, a `ZoteroReaderView` with `evoStripOnly()`), `src/ui/evo-strip/follow.ts` (new: an editor update listener and `active-leaf-change`), `src/utils/evo-line-links.ts` (new). Hooks in `src/ui/reader/view.ts`: `evoStripOnly()`, `evoReaderOpened()`, `evoCloseDocument()`, no single-instance guard, no reading position saved, no source note refresh for it; `stripOnlyChromeOptions()`, `connectStripOnly()`, `showMenuOverFrame()` in `chrome.ts`; `stripOnly` and `noteStripOpen` in `src/types/zotero-reader.d.ts`; `registerEvoStrip()` in `src/main.ts` | Requested. The reader's own strip is reused, so its features need not be built twice; the document is loaded but out of sight. |
+| Annotation edits reach the other views of the same attachment (beta.9): a reader or the strip tab that saves or deletes an annotation raises `annotationChanged`; the other views of that attachment read it again | `evoTellOthers()` in `src/ui/reader/view.ts` | So a reader and the strip tab showing the same file stay in step. |
+| Library browser, beta.9: new collections (right-click on a library → "New collection…", on a collection → "New sub-collection…": a field in place, Enter creates it and shows it, Escape gives up), "Move collection to trash" (with the collections inside it, as Zotero does; its items stay), a Trash under each library (its trashed items, right-click → "Restore to library"; Delete does nothing there; opened, its trashed collections, right-click → "Restore to library", which brings back what is inside and what it is in). A collection inside a trashed one is not listed. Shift+drop of items on a collection moves them there from the collection shown | `createCollection()`, `trashCollection()`, `restoreCollection()` (Zotero's multi-object write) in `collection-edits.ts`; `collectionsWritten()`, `collectionFamily()`, `restoreItems()`, the trash scope (`EvoScope.trash`) and `trashedCollections` in `src/worker/services/evo-library.ts`; `moveItemsToCollection()`, `restoreItems()`, `DraggedItems.fromCollection` in `actions.ts`; `CollectionPane.tsx`, `LibraryBrowser.tsx`, `menus.ts` | Requested ("what else?" 1, 2, 3, 6). Permanent deletion is left out. |
+| Library browser, beta.9: sorting by the attachment column puts items without a file first when descending (not always last); toggles that are on (match case, whole words, sub-collections, item pane) have a held-down background and a ring, not only a colour | `sortRows()` in `src/utils/evo-library-model.ts`; `.zotflow-evo-tool.is-on` in `styles.css` | Requested. |
+| Item pane, beta.9: right-click on a PDF or EPUB → "Rename file from template": its `filename` becomes the file name template's result (extension kept; the title too where it was the old file name), as Zotero renames a file; every Zotero client renames its copy when it syncs the new name. Only files stored in Zotero | `renameAttachmentFile()` and `attachmentRename()` (`src/worker/services/evo-library.ts`, `src/utils/evo-library-model.ts`); `renameAttachmentFile()` in `actions.ts`; the menu in `ItemDetails.tsx` | Requested ("what else?" 9). Zotero's sync renames the local file when `filename` changes (`syncLocal.js`), and a WebDAV ZIP with one file is renamed on unpacking (`storageLocal.js`). |
+| Full-text search, beta.9: no fading at the snippets' edges (the match's lines are scrolled to by whole lines); "N more in this document" is a row of its own in the accent colour | `SnippetView`, `HitView` in `FulltextSearch.tsx`; `styles.css` | Requested. |
+| Reader, beta.9: the strip mirrors only the fork's toggles at last (beta.8 marked them but did not filter: the bookmark, more options and "Open source note" buttons were still in the strip); the title's menu closes on the first click outside it, also in the reader (a cover under the menu takes that click) | `headerActions()`, `showMenuOverFrame()` in `chrome.ts`; `.zotflow-evo-menu-cover` in `styles.css` | Fixes. |
+| Groundwork, beta.9: the schema generator also writes the fields and creator types of each item type and Zotero's CSL-JSON mapping, for making an item from a DOI later. Nothing uses it yet | `scripts/generate-zotero-item-schema.js`; `src/types/zotero-csl-schema.ts` (generated) | Adding items by DOI, ISBN or URL was set aside: Zotero's own tools do it. |
+| The full-text worker is stopped when the plugin unloads (beta.8 imported the stop but did not register it) | `registerEvoLibrary()` in `views.tsx` | Fix. |
+
+Known limits and open checks of these (as of 1.7.1-beta.9):
 
 - Automatic sync was written against Zotero's own streaming client and is
   covered by unit tests with a fake stream; it had not yet been run against
@@ -114,6 +125,17 @@ Known limits and open checks of these (as of 1.7.1-beta.8):
 - Renaming and moving collections, and the new item from an ISBN, were
   checked against stand-ins for Zotero's API, Open Library and Google
   Books.
+- Creating, trashing and restoring collections (beta.9) were checked
+  against a stand-in for Zotero's API; that the API takes `deleted: false`
+  for a collection to restore it is from Zotero's data model, not from a
+  run against it. Renaming a file sends only the new `filename` with the
+  next sync; not checked against Zotero's servers or a second client.
+- The annotation strip tab follows editors whose update listener Obsidian
+  runs. Whether Kanban's card editors are among them is not known; if not,
+  kanban-evo has to say which card is being edited. Reading view has no
+  cursor: there only the note itself (a source note) is followed. The
+  strip tab loads the whole document for each item it shows (hidden); a
+  move to another item opens it anew. An EPUB has no strip.
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
@@ -136,6 +158,8 @@ only call into them; every such line is marked `ZotFlow Evo`.
 | Note strip, beta.7: the head's buttons and colour filters show only while the pointer is over the strip (head or comments; a short linger covers the crossing); hidden they keep their room. The Obsidian view's header buttons stand first in that row (`actions`), then highlights and +; the filters move to a second line when the strip is narrow. New highlights icon (Lucide's highlighter: struck through when off, inked and accented when on); + is Lucide's plus | `_trackHover()` and `toTopPoint()` in `strip-host.js`; `StripHead`, `ViewAction`, `IconHighlights` in `note-strip.js`; `reportNoteStripAction()` in `obsidian-evo.js` (event `noteStripAction` with the click's place in the reader's document); styles in `_evo.scss` | Requested. The hover class is on the body of both documents (the root's classes are the reader document's). |
 | Note strip, beta.7: anchored, with no comment in view, a small arrow at the top and/or the bottom with the page of the nearest comment that way | `arrowTargets()` in `strip-layout.mjs` (tested); `setArrows()` and the arrows' styles in `strip-host-pdf.js`; an effect in `Strip` | Requested. The arrows are in the PDF view's document, over the strip, and take no clicks (that document is the PDF view's). |
 | Note strip, beta.7: a list whose comments are all folded away no longer says "No comments yet"; the head's title draws `<i>` in italics | `any` of the model in `Strip`; `titleRuns()` in `strip-layout.mjs` | Fixes. |
+
+| The strip alone (beta.9, the plugin's annotation strip tab): `stripOnly` in the strip settings puts `zf-evo-strip-only` on the reader's body, the PDF view's root and the strip's documents: no toolbar or sidebar, the pages (or the snapshot) hidden, the strip across the whole reader as a list, no resize handle, no page filter. The page number opens the place, as does Ctrl/Cmd+click on an entry (`noteStripOpen` to the plugin); headings too. A click under an entry still starts a note after it; a click with nothing above does nothing (the place being read is not in sight) | `applyNoteStrip()`, `reportNoteStripOpen()`, `STRIP_ONLY_CLASS` in `obsidian-evo.js`; `setStripOnly()` in `strip-host.js`, `_applyStripOnly()` in `strip-host-pdf.js`; `stripOnly` in `Strip`, `StripHead`, `Card` (`onOpen`), `EvoNoteStrip` in `note-strip.js`; `_evo.scss` | Requested. |
 
 Known limits of these: with the toolbar hidden, Tab still cycles through
 the hidden toolbar's focus groups (`focus-manager.js` is untouched), and the
@@ -171,6 +195,53 @@ appearance and read-aloud popups keep their 41px offset.
 - **Libraries.** Zotero's local library 1 is ZotFlow's personal library;
   groups are matched by group id. Items of libraries ZotFlow does not sync
   are not listed (they are not in any chosen collection).
+
+### Hooks for other plugins
+
+For kanban-evo (and other evo plugins), ZotFlow Evo tells when what a
+collection holds has changed. Two ways to listen, whichever loads first:
+
+```ts
+// a workspace event (works before or after ZotFlow Evo loads)
+this.registerEvent(app.workspace.on("zotflow-evo:collections-changed", (changes) => …));
+// or the plugin's API (returns the function that stops it)
+const off = app.plugins.plugins["zotflow-evo"]?.api?.onCollectionsChanged((changes) => …);
+```
+
+`changes` is a list of `{ libraryID, collectionKey, added, removed,
+collectionChanged }`: `added` and `removed` are item keys that came into or
+left the collection (top-level items only; moving an item to the trash
+counts as leaving, restoring as coming back); `collectionChanged` says the
+collection itself was created, renamed, moved, trashed or deleted. Only the
+collection an item is directly in is named: a board that includes
+sub-collections works out the parents itself. `api.version` is 1.
+
+The news comes from the database (Dexie hooks in the worker), gathered for
+250 ms, so a sync of many items is a few events. It is a hint to read again,
+not a log: changes made while a listener was not there are not repeated, so
+a board reads the collection when it opens. ZotFlow's database is the
+IndexedDB database `zotflow-dev` (tables `items`, `collections`; see
+AGENTS.md, "Database").
+
+### Annotation strip tab
+
+A tab with the note strip alone ("Open annotation strip"), beside the note
+being written. When the cursor rests (150 ms) on a line of a note, the
+first link on that line (`[[…]]`, `![[…]]`, `[…](…)`) to a source note
+(`zotero-key` and `library-id` in its frontmatter) names the item; a line
+without one leaves the strip as it is, unless the note is itself a source
+note. Editors inside frames (the strip's own comment editors) are not
+followed, nor the strip tab. Nothing runs while no strip tab is open.
+
+The tab is a reader view (`EvoStripView extends ZoteroReaderView`) whose
+reader is told `stripOnly`: the document is loaded and kept out of sight,
+and the reader's own strip shows its annotations. So everything the strip
+does beside a PDF it does here; what needs the page in sight (a note "for
+what is being read", the page filter, going to an entry on the page) is
+left out or opens a reader instead. Its scroll position is not kept as the
+attachment's reading position, and it does not count as the attachment's
+reader (a reader of the same file can be open beside it; edits in either
+reach the other).
 
 ### How the note strip works
 

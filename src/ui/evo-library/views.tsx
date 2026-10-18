@@ -421,4 +421,6 @@ export function registerEvoLibrary(plugin: Plugin) {
         FULLTEXT_VIEW_TYPE,
         (leaf) => new EvoFulltextView(leaf),
     );
+    // The full-text worker does not outlive the plugin.
+    plugin.register(() => fulltextEngine.stop());
 }

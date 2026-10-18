@@ -22,7 +22,7 @@ import {
 import { COLUMNS } from "utils/evo-library-model";
 
 import type { App, WorkspaceLeaf } from "obsidian";
-import type { ColumnId, SortSpec } from "utils/evo-library-model";
+import type { SortSpec } from "utils/evo-library-model";
 import type { EvoItemRow } from "utils/evo-library-model";
 import type { EvoScope } from "worker/services/evo-library";
 
@@ -31,6 +31,8 @@ export interface ItemMenuEdits {
     /** In a collection: take the selection out of it. */
     onRemove?: () => void;
     onTrash?: () => void;
+    /** In the trash: bring the selection back. */
+    onRestore?: () => void;
 }
 
 /** Right-click on a row. */
@@ -73,7 +75,16 @@ export function showItemMenu(
             .setIcon("external-link")
             .onClick(() => showInZotero(row.libraryID, row.key)),
     );
-    if (edits.onRemove || edits.onTrash) menu.addSeparator();
+    if (edits.onRemove || edits.onTrash || edits.onRestore) menu.addSeparator();
+    if (edits.onRestore) {
+        const onRestore = edits.onRestore;
+        menu.addItem((item) =>
+            item
+                .setTitle("Restore to library")
+                .setIcon("archive-restore")
+                .onClick(onRestore),
+        );
+    }
     if (edits.onRemove) {
         const onRemove = edits.onRemove;
         menu.addItem((item) =>
@@ -108,9 +119,37 @@ export function showCollectionMenu(
         pinned?: boolean;
         onPin?: (on: boolean) => void;
         onRename?: () => void;
+        /** A new collection in this one (in the library: at its top). */
+        onNewCollection?: () => void;
+        onTrash?: () => void;
+        /** A collection in the trash: bring it back. */
+        onRestore?: () => void;
     },
 ): void {
     const menu = new Menu();
+    if (options.onRestore) {
+        const onRestore = options.onRestore;
+        menu.addItem((item) =>
+            item
+                .setTitle("Restore to library")
+                .setIcon("archive-restore")
+                .onClick(onRestore),
+        );
+        menu.addSeparator();
+    }
+    if (options.onNewCollection) {
+        const onNew = options.onNewCollection;
+        menu.addItem((item) =>
+            item
+                .setTitle(
+                    scope.collectionKey === null
+                        ? "New collection…"
+                        : "New sub-collection…",
+                )
+                .setIcon("folder-plus")
+                .onClick(onNew),
+        );
+    }
     if (options.onRename) {
         const onRename = options.onRename;
         menu.addItem((item) =>
@@ -147,6 +186,17 @@ export function showCollectionMenu(
             .setChecked(options.subcollections)
             .onClick(() => options.onSubcollections(!options.subcollections)),
     );
+    if (options.onTrash) {
+        const onTrash = options.onTrash;
+        menu.addSeparator();
+        menu.addItem((item) =>
+            item
+                .setTitle("Move collection to trash")
+                .setIcon("trash-2")
+                .setWarning(true)
+                .onClick(onTrash),
+        );
+    }
     menu.showAtMouseEvent(event);
 }
 

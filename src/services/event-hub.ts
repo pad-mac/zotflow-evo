@@ -47,6 +47,29 @@ export class EventHub {
      * only library the sync covered.
      */
     public readonly syncFinished = new EventBus<[task: ITaskInfo]>();
+
+    /**
+     * ZotFlow Evo (fork): what collections hold changed — items added or
+     * removed (top-level, not trashed), or the collection itself renamed,
+     * moved, created, trashed or deleted. From the worker's database hooks
+     * (`worker/services/evo-collection-watch.ts`); passed on to other
+     * plugins by `services/evo-api.ts`.
+     */
+    public readonly collectionsChanged = new EventBus<
+        [changes: CollectionChange[]]
+    >();
+}
+
+/** One collection whose contents or own fields changed. */
+export interface CollectionChange {
+    libraryID: number;
+    collectionKey: string;
+    /** Item keys that came into the collection. */
+    added: string[];
+    /** Item keys that left it (removed, trashed or deleted). */
+    removed: string[];
+    /** The collection itself was created, renamed, moved, trashed or deleted. */
+    collectionChanged: boolean;
 }
 
 /** An edit that reached a note no longer in the database. */
@@ -78,4 +101,5 @@ export type WorkerEventName =
     | "noteChangedByEditor"
     | "noteChangedByNoteView"
     | "treeChanged"
-    | "noteGone";
+    | "noteGone"
+    | "collectionsChanged";

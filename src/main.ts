@@ -35,6 +35,8 @@ import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
 import { registerEvoLibrary } from "ui/evo-library/views";
 import { registerAttachFromWebViewer } from "ui/evo-library/attach-file";
 import { registerSourceNoteLinks } from "ui/evo-source-links";
+import { registerEvoApi } from "services/evo-api";
+import { registerEvoStrip } from "ui/evo-strip/follow";
 import { refreshEvoAutoSync, startEvoAutoSync } from "services/evo-auto-sync";
 import { promptNoteGone } from "ui/modals/note-gone-modal";
 
@@ -307,6 +309,10 @@ export default class ZotFlow extends Plugin {
         registerAttachFromWebViewer(this);
         // ZotFlow Evo: a click on a link to a source note opens the PDF.
         registerSourceNoteLinks(this);
+        // ZotFlow Evo: collection changes, for other plugins (kanban-evo).
+        registerEvoApi(this);
+        // ZotFlow Evo: the note strip in a tab of its own, following the line.
+        registerEvoStrip(this);
 
         this.addCommand({
             id: "open-tree-view",

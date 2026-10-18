@@ -79,6 +79,11 @@ export interface ReaderNoteStrip {
     actions?: NoteStripAction[];
     /** Colour filter over PDF pages (KOReader-like). */
     pdfFilter?: { whiteThreshold: number; contrast: number; saturation: number };
+    /**
+     * The strip alone (the annotation strip tab): the document is loaded but
+     * not shown; entries open in a reader (`noteStripOpen`).
+     */
+    stripOnly?: boolean;
 }
 
 /** ZotFlow Evo: a header button of the reader view, mirrored in the note strip. */
@@ -106,6 +111,7 @@ export type ChildEvents =
     | { type: "noteStripChanged"; settings: ReaderNoteStrip }
     /** ZotFlow Evo: a mirrored header button was clicked in the note strip, at x/y of the reader's document. */
     | { type: "noteStripAction"; id: string; x: number; y: number }
+    | { type: "noteStripOpen"; location: Record<string, unknown> }
     | {
           type: "openTagsPopup";
           annotationID: unknown;

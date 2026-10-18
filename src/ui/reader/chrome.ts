@@ -112,6 +112,93 @@ export function notifyReaderChromeChanged() {
     chromeChanged.emit();
 }
 
+/**
+ * The annotation strip tab (ui/evo-strip): the strip alone, always shown,
+ * as a list; the reader's toolbar off.
+ */
+function stripOnlySettings(): ReaderNoteStrip {
+    return {
+        ...noteStripSettings(),
+        visible: true,
+        collapsed: true,
+        stripOnly: true,
+        actions: [],
+    };
+}
+
+/** `readerChromeOptions()` for the annotation strip tab. */
+export function stripOnlyChromeOptions(): Pick<
+    CreateReaderOptions,
+    "toolbarHidden" | "noteStrip"
+> {
+    return { toolbarHidden: true, noteStrip: stripOnlySettings() };
+}
+
+/**
+ * The annotation strip tab's reader is open: it follows the shared strip
+ * settings (the highlights button) like every reader, and what is asked of
+ * its head (an author, the title's menu) and its entries (open a place)
+ * comes to `handlers`.
+ */
+export function connectStripOnly(
+    view: ItemView,
+    bridge: IframeReaderBridge,
+    handlers: {
+        onOpen: (location: Record<string, unknown>) => void;
+        onTitleMenu: (at: { x: number; y: number }) => void;
+    },
+): () => void {
+    const offChrome = chromeChanged.subscribe(() => {
+        if (bridge.state !== "reader-ready") return;
+        ff(
+            bridge.setNoteStrip(stripOnlySettings()),
+            "Failed to update the strip",
+        );
+    });
+    bridge.onEventType("noteStripOpen", (event) => {
+        if (event.location && typeof event.location === "object")
+            handlers.onOpen(event.location);
+    });
+    bridge.onEventType("noteStripAction", (event) => {
+        const frame = view.containerEl.querySelector("iframe");
+        const box = frame?.getBoundingClientRect();
+        const at = {
+            x: (box?.left ?? 0) + event.x,
+            y: (box?.top ?? 0) + event.y,
+        };
+        if (event.id === "title-menu") handlers.onTitleMenu(at);
+        else if (event.id.startsWith("person:"))
+            void view.app.workspace.openLinkText(
+                event.id.slice("person:".length),
+                "",
+                false,
+            );
+    });
+    return offChrome;
+}
+
+/**
+ * A menu opened at a point of a reader frame: a click in the frame stays in
+ * it, where the menu does not see it, so while the menu is open a cover
+ * under it takes the click.
+ */
+export function showMenuOverFrame(
+    menu: Menu,
+    at: { x: number; y: number },
+    doc: Document,
+) {
+    const cover = doc.body.createDiv({ cls: "zotflow-evo-menu-cover" });
+    const close = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        menu.hide();
+    };
+    cover.addEventListener("pointerdown", close);
+    cover.addEventListener("contextmenu", close);
+    menu.onHide(() => cover.remove());
+    menu.showAtPosition(at, doc);
+}
+
 /** The note strip settings in the shape the reader takes, without the banner. */
 function noteStripSettings(): ReaderNoteStrip {
     const settings = services.settings;
@@ -332,6 +419,9 @@ class ReaderChromeControls {
         for (const el of Array.from(
             bar.querySelectorAll<HTMLElement>(".view-action"),
         )) {
+            // Only the fork's toggles: not Obsidian's own buttons (bookmark,
+            // more options), nor "Open source note" (in the title's menu).
+            if (el.dataset.zfEvoChrome !== "1") continue;
             if (el.style.display === "none" || el.hidden) continue;
             const id = (el.dataset.zfEvoAction ??= String(++actionCount));
             out.push({
@@ -416,7 +506,7 @@ class ReaderChromeControls {
                     ),
             );
         }
-        menu.showAtPosition(at, this.view.containerEl.ownerDocument);
+        showMenuOverFrame(menu, at, this.view.containerEl.ownerDocument);
     }
 
     /** Hide or show the header, and send the strip the buttons to show for it. */

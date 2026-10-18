@@ -397,10 +397,14 @@ export function sortRows(
     sort: SortSpec,
 ): EvoItemRow[] {
     const dir = sort.descending ? -1 : 1;
+    // Empty cells stay at the end either way; not in the attachment column,
+    // where "no file" is a value of its own and comes first descending.
     const empty = (r: EvoItemRow) =>
-        sort.column === "annotations"
-            ? r.annotationCount === 0
-            : !cellText(r, sort.column);
+        sort.column === "attachment"
+            ? false
+            : sort.column === "annotations"
+              ? r.annotationCount === 0
+              : !cellText(r, sort.column);
     return [...rows].sort((a, b) => {
         const ea = empty(a);
         const eb = empty(b);
@@ -969,4 +973,52 @@ export function isInside(
         at = parents.get(collectionId(libraryID, at));
     }
     return false;
+}
+
+/** The fields of an attachment a rename of its file reads. */
+export interface AttachmentFileFacts {
+    filename?: string;
+    title?: string;
+    contentType?: string;
+    linkMode?: string;
+}
+
+/**
+ * The new `filename` (and title) of an attachment whose file is renamed to
+ * `base` (the file name template's result, without extension), as Zotero
+ * renames one: the extension kept, the title changed only where it was the
+ * old file name. Only a PDF or EPUB stored in Zotero (a single file, which
+ * Zotero renames on every computer when it syncs the new name); a snapshot
+ * is a folder of files, a linked file is on one computer. Null: the name is
+ * already that.
+ */
+export function attachmentRename(
+    current: AttachmentFileFacts,
+    base: string,
+): { filename: string; title?: string } | { refused: string } | null {
+    if (
+        current.linkMode !== "imported_file" &&
+        current.linkMode !== "imported_url"
+    )
+        return { refused: "Only files stored in Zotero are renamed here." };
+    const type = (current.contentType ?? "").toLowerCase();
+    const byType =
+        type === "application/pdf"
+            ? "pdf"
+            : type === "application/epub+zip"
+              ? "epub"
+              : null;
+    if (!byType) return { refused: "Only PDFs and EPUBs are renamed here." };
+    if (!base.trim())
+        return { refused: "The file name template gave nothing." };
+    const old = current.filename ?? "";
+    const dot = old.lastIndexOf(".");
+    const ext = dot > 0 ? old.slice(dot + 1) : byType;
+    const filename = `${base.trim()}.${ext}`;
+    if (filename === old) return null;
+    const oldStem = dot > 0 ? old.slice(0, dot) : old;
+    const title = current.title ?? "";
+    return old && (title === old || title === oldStem)
+        ? { filename, title: filename }
+        : { filename };
 }

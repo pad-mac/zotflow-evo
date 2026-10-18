@@ -26,6 +26,7 @@ import { ConvertService } from "./services/convert";
 import { ItemNoteService } from "./services/item-note";
 import { CslRenderWorkerService } from "./services/csl-render";
 // ZotFlow Evo
+import { watchCollections } from "./services/evo-collection-watch";
 import { EvoLibraryService } from "./services/evo-library";
 import { TaskManager } from "./tasks/manager";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
@@ -290,6 +291,7 @@ const exposedApi: WorkerAPI = {
 
             _cslRender = new CslRenderWorkerService(settings);
             _evoLibrary = new EvoLibraryService(settings, _library, parentHost);
+            watchCollections(parentHost);
             finishStage("Create CSL service");
 
             _template = new LibraryTemplateService(
