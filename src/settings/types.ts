@@ -174,6 +174,8 @@ export interface ZotFlowSettings {
      * strip (editable), or the library's item pane (read only, faster).
      */
     evoStripTabMode: "reader" | "item-pane";
+    /** ZotFlow Evo: the languages OCR reads (Tesseract codes), as last chosen in the PDF editing menu. */
+    evoOcrLanguages: string[];
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -315,6 +317,7 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoCollectionIndent: true,
     readerPdfFilters: {},
     evoStripTabMode: "item-pane",
+    evoOcrLanguages: ["deu", "eng"],
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

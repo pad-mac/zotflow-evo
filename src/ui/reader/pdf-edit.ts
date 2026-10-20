@@ -5,7 +5,8 @@
  * old one (Zotero's file upload, `If-Match` the md5 this device knows), its
  * annotations moved with their pages, and the reader opened again once a
  * sync has brought the new file's md5. Extracted pages become a new PDF
- * (a standalone attachment) in the chosen collection.
+ * (a standalone attachment) in the chosen collection. OCR comes first
+ * (evo-ocr.ts), so the extracted pages have the recognized text too.
  *
  * Only PDFs stored in Zotero (not linked files) in libraries ZotFlow may
  * write to and whose files are in Zotero's storage (not WebDAV).
@@ -19,7 +20,9 @@ import {
     uploadFileBytes,
 } from "ui/evo-library/attach-file";
 import { startSync } from "ui/start-sync";
-import { extractPages, rewritePdf } from "utils/evo-pdf-rewrite";
+import { OcrCancelled, recognizePages } from "ui/reader/evo-ocr";
+import { isOcrLanguageCode } from "ui/reader/evo-ocr-languages";
+import { extractPages, ocrCandidates, rewritePdf } from "utils/evo-pdf-rewrite";
 import { openAttachment } from "utils/viewer";
 
 import type { App } from "obsidian";
@@ -132,6 +135,55 @@ export async function runPdfEdit(
         const original = new Uint8Array(await blob.arrayBuffer());
         const filter = request.pageFilter;
 
+        // OCR: the pages without drawn text, before anything else.
+        let source: Uint8Array = original;
+        const doneFirst: string[] = [];
+        if (request.ocr) {
+            const languages = request.ocr.languages.filter(isOcrLanguageCode);
+            if (languages.length) {
+                services.settings.evoOcrLanguages = languages;
+                void services.saveSettings().catch(() => undefined);
+            }
+            const { pages, withText } = await ocrCandidates(original);
+            if (!pages.length) {
+                notify.notify(
+                    "warning",
+                    "Every page already has text; there was nothing to recognize.",
+                );
+            } else {
+                const controller = new AbortController();
+                const status = (done: number) =>
+                    `Recognizing text: ${done} of ${pages.length} ${pages.length === 1 ? "page" : "pages"}…`;
+                const progress = notify.progress(status(0), () =>
+                    controller.abort(),
+                );
+                try {
+                    const { texts, failed } = await recognizePages(
+                        original,
+                        pages,
+                        languages,
+                        {
+                            signal: controller.signal,
+                            onProgress: (p) => progress.update(status(p.done)),
+                        },
+                    );
+                    const result = await rewritePdf(original, { ocr: texts });
+                    source = result.bytes;
+                    doneFirst.push(...result.done);
+                    if (withText.length)
+                        doneFirst.push(
+                            `left ${withText.length} ${withText.length === 1 ? "page" : "pages"} that had text`,
+                        );
+                    if (failed.length)
+                        doneFirst.push(
+                            `could not read ${failed.length} ${failed.length === 1 ? "page" : "pages"}`,
+                        );
+                } finally {
+                    progress.close();
+                }
+            }
+        }
+
         // Extracted pages: a new PDF, taken from the file as it was.
         let extractedKey: string | null = null;
         if (request.extract?.pages.length) {
@@ -142,7 +194,7 @@ export async function runPdfEdit(
             );
             const filename = `${stem}_pp${range.replace(/, /g, "_")}.pdf`;
             const title = `${item.raw.data.title || stem} (pp. ${range})`;
-            const bytes = await extractPages(original, request.extract.pages, {
+            const bytes = await extractPages(source, request.extract.pages, {
                 title,
                 pageFilter: filter,
             });
@@ -161,12 +213,13 @@ export async function runPdfEdit(
 
         // The file itself.
         const rewrite =
+            source !== original ||
             !!request.split ||
             !!request.removeOutline ||
             Object.keys(request.straighten ?? {}).length > 0 ||
             !!request.saveFilter;
         if (rewrite) {
-            const result = await rewritePdf(original, {
+            const result = await rewritePdf(source, {
                 split: request.split,
                 straighten: request.straighten,
                 removeOutline: request.removeOutline,
@@ -201,8 +254,9 @@ export async function runPdfEdit(
                 );
                 if (r.changed) noteLocalEdit(item.libraryID);
             }
-            const what = result.done.length
-                ? result.done.join(", ")
+            const done = [...doneFirst, ...result.done];
+            const what = done.length
+                ? done.join(", ")
                 : "saved the page filter in it";
             notify.notify(
                 "info",
@@ -229,6 +283,10 @@ export async function runPdfEdit(
                 );
         }
     } catch (e) {
+        if (e instanceof OcrCancelled) {
+            notify.notify("info", "OCR cancelled; the PDF was left as it was.");
+            return;
+        }
         services.logService.error("PDF editing failed", "PdfEdit", e);
         notify.notify(
             "error",

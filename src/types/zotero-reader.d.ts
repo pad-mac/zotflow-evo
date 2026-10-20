@@ -211,6 +211,13 @@ export type ParentAPI = {
      * paths ("Media theory / Kittler"), for the PDF editing menu.
      */
     evoListCollections?: () => Promise<{ key: string; path: string }[]>;
+    /** ZotFlow Evo: the languages OCR can read here, and those chosen last. */
+    evoOcrLanguages?: () => Promise<{
+        installed: { code: string; name: string }[];
+        selected: string[];
+    }>;
+    /** ZotFlow Evo: open the plugin's settings (to install OCR languages). */
+    evoOpenOcrSettings?: () => void;
 };
 
 /** The upstream Reader owns successful SDT results for the lifetime of its document. */
@@ -300,6 +307,8 @@ export interface CustomReaderTheme {
  * `src/evo/pdf-edit-panel.js` in the reader and `ui/reader/pdf-edit.ts`).
  */
 export interface PdfEditRequest {
+    /** Recognize the text of the pages without drawn text, in these languages. */
+    ocr?: { languages: string[] };
     /** Cut pages in two: fractions of each page's width as shown. */
     split?: { shared: number; pages: Record<string, number> };
     /** Pages to turn level: degrees each (positive: lines go down to the right). */

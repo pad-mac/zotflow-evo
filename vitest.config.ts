@@ -13,6 +13,8 @@ export default defineConfig({
             // pulled in transitively may touch the runtime. Point at a stub so
             // the import resolves instead of exploding.
             obsidian: path.resolve(import.meta.dirname, "tests/stubs/obsidian.ts"),
+            // ZotFlow Evo: OCR's embedded resources are only built by esbuild.
+            "virtual:ocr-resources": path.resolve(import.meta.dirname, "tests/stubs/ocr-resources.ts"),
         },
     },
     test: {

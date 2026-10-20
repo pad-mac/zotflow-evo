@@ -8,6 +8,9 @@
  *   and a second page, sharing its content, shows the right part — the
  *   content is not copied, so a scan does not double the file. Page labels
  *   are removed (they would name the wrong pages);
+ * - OCR: an earlier OCR layer taken out, the recognized text laid over
+ *   the page (evo-pdf-ocr-layer.ts), before the page is turned or cut so
+ *   the text goes with it;
  * - remove outline: the bookmarks;
  * - the page filter: written into the Info dictionary (PDF_INFO_FILTER_KEY,
  *   JSON in KOReader's units).
@@ -27,12 +30,31 @@ import {
 } from "pdf-lib";
 
 import { PDF_INFO_FILTER_KEY } from "utils/evo-pdf-filter";
+import {
+    VISIBLE_TEXT_LIMIT,
+    materializeResources,
+    overlayTextPage,
+    pageText,
+    removeInvisibleText,
+} from "utils/evo-pdf-ocr-layer";
 import { rotationMatrix, splitBoxes } from "utils/evo-pdf-geometry";
 
 import type { PdfFilter } from "utils/evo-pdf-filter";
+import type { Matrix } from "utils/evo-pdf-ocr-layer";
 import type { Box, PagePlan } from "utils/evo-pdf-geometry";
 
+/** The text recognized on one page: Tesseract's text-only PDF of its image. */
+export interface OcrPageText {
+    pageIndex: number;
+    pdf: Uint8Array;
+    /** The image: its size in pixels, and its pixels → the page's user space. */
+    width: number;
+    height: number;
+    toUser: Matrix;
+}
+
 export interface RewriteRequest {
+    ocr?: OcrPageText[];
     split?: { shared: number; pages: Record<string, number> };
     straighten?: Record<string, number>;
     removeOutline?: boolean;
@@ -98,7 +120,34 @@ export async function rewritePdf(
     const plans: PagePlan[] = pages.map((_, i) => ({ newIndex: i }));
     const done: string[] = [];
 
-    // Straighten first: the content of each tilted page turned level.
+    // OCR first: the text then turns and is cut with the page.
+    let recognized = 0;
+    let ocrFailed = 0;
+    for (const text of request.ocr ?? []) {
+        const page = pages[text.pageIndex];
+        if (!page) continue;
+        materializeResources(page);
+        try {
+            removeInvisibleText(doc, page);
+        } catch {
+            // A content stream this cannot read: no second text layer over
+            // one that may be there.
+            ocrFailed++;
+            continue;
+        }
+        await overlayTextPage(doc, page, text.pdf, text);
+        recognized++;
+    }
+    if (ocrFailed)
+        done.push(
+            `left ${ocrFailed} ${ocrFailed === 1 ? "page" : "pages"} without new text (unreadable content)`,
+        );
+    if (recognized)
+        done.push(
+            `recognized the text of ${recognized} ${recognized === 1 ? "page" : "pages"}`,
+        );
+
+    // Straighten: the content of each tilted page turned level.
     let turned = 0;
     for (const [key, degrees] of Object.entries(request.straighten ?? {})) {
         const i = Number(key);
@@ -200,4 +249,26 @@ export async function pdfHasOutline(input: Uint8Array): Promise<boolean> {
     const doc = await PDFDocument.load(input, { updateMetadata: false });
     const outlines = doc.catalog.lookupMaybe(PDFName.of("Outlines"), PDFDict);
     return !!outlines && !!outlines.get(PDFName.of("First"));
+}
+
+/**
+ * The pages OCR is for: those without drawn text (a scan, or a scan with
+ * an earlier OCR layer); pages that draw text are born digital and left.
+ */
+export async function ocrCandidates(
+    input: Uint8Array,
+): Promise<{ pages: number[]; withText: number[] }> {
+    const doc = await PDFDocument.load(input, { updateMetadata: false });
+    const pages: number[] = [];
+    const withText: number[] = [];
+    doc.getPages().forEach((page, i) => {
+        let visible = 0;
+        try {
+            visible = pageText(doc, page).visible;
+        } catch {
+            visible = 0;
+        }
+        (visible >= VISIBLE_TEXT_LIMIT ? withText : pages).push(i);
+    });
+    return { pages, withText };
 }

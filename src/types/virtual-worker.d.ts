@@ -14,3 +14,11 @@ declare module "virtual:sqlite-wasm-binary" {
     const wasm: Uint8Array;
     export default wasm;
 }
+
+/**
+ * ZotFlow Evo: OCR's resources (esbuild.config.mjs): "worker.min.js",
+ * "core.wasm.js" (gzipped, base64) and "<lang>.traineddata.gz" (base64).
+ */
+declare module "virtual:ocr-resources" {
+    export default function ocrResource(name: string): string | undefined;
+}

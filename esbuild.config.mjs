@@ -249,6 +249,61 @@ const copyLicensePlugin = {
     },
 };
 
+/**
+ * ZotFlow Evo: OCR (src/ui/reader/evo-ocr.ts) — Tesseract.js's worker, its
+ * WebAssembly core (SIMD, LSTM only) and the English, German and French
+ * models, embedded base64 (the .js gzipped; the models are gzipped
+ * already). Only unpacked while text is being recognized.
+ */
+const OCR_RESOURCES = {
+    "worker.min.js": {
+        file: "node_modules/tesseract.js/dist/worker.min.js",
+        gzip: true,
+    },
+    "core.wasm.js": {
+        file: "node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm.js",
+        gzip: true,
+    },
+    ...Object.fromEntries(
+        ["eng", "deu", "fra"].map((lang) => [
+            `${lang}.traineddata.gz`,
+            {
+                file: `node_modules/@tesseract.js-data/${lang}/4.0.0_best_int/${lang}.traineddata.gz`,
+                gzip: false,
+            },
+        ]),
+    ),
+};
+
+const ocrResourcePlugin = {
+    name: "ocr-resource-plugin",
+    setup(build) {
+        build.onResolve({ filter: /^virtual:ocr-resources$/ }, (args) => ({
+            path: args.path,
+            namespace: "ocr-resources",
+        }));
+        build.onLoad({ filter: /.*/, namespace: "ocr-resources" }, () => {
+            let cases = "";
+            for (const [name, { file, gzip }] of Object.entries(
+                OCR_RESOURCES,
+            )) {
+                const bytes = fs.readFileSync(path.resolve(file));
+                const base64 = (
+                    gzip ? zlib.gzipSync(bytes, { level: 9 }) : bytes
+                ).toString("base64");
+                cases += `    case ${JSON.stringify(name)}: return ${JSON.stringify(base64)};\n`;
+            }
+            return {
+                contents: `export default function ocrResource(name) {\n  switch (name) {\n${cases}    default: return undefined;\n  }\n}\n`,
+                loader: "js",
+                watchFiles: Object.values(OCR_RESOURCES).map((r) =>
+                    path.resolve(r.file),
+                ),
+            };
+        });
+    },
+};
+
 const context = await esbuild.context({
     banner: {
         js: banner,
@@ -284,6 +339,7 @@ const context = await esbuild.context({
         copyLicensePlugin,
         inlineWorkerPlugin,
         fulltextWorkerPlugin,
+        ocrResourcePlugin,
     ],
 });
 

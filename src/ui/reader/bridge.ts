@@ -33,6 +33,10 @@ import {
 } from "ui/editor/citation-helper";
 import { plainCommentDrop } from "ui/editor/evo-drop";
 import {
+    OCR_LANGUAGE_NAMES,
+    installedOcrLanguages,
+} from "ui/reader/evo-ocr-languages";
+import {
     createEmbeddableMarkdownEditor,
     EmbeddableMarkdownEditor,
     type MarkdownEditorProps,
@@ -469,6 +473,33 @@ export class IframeReaderBridge {
                 };
                 walk(library?.collections ?? [], "");
                 return out;
+            },
+
+            evoOcrLanguages: async () => {
+                const installed = await installedOcrLanguages();
+                const selected = (
+                    services.settings.evoOcrLanguages ?? []
+                ).filter((code) => installed.includes(code));
+                return {
+                    installed: installed.map((code) => ({
+                        code,
+                        name: OCR_LANGUAGE_NAMES[code] ?? code,
+                    })),
+                    selected: selected.length ? selected : ["eng"],
+                };
+            },
+
+            evoOpenOcrSettings: () => {
+                const setting = (
+                    services.app as unknown as {
+                        setting?: {
+                            open(): void;
+                            openTabById(id: string): void;
+                        };
+                    }
+                ).setting;
+                setting?.open();
+                setting?.openTabById(services.plugin.manifest.id);
             },
 
             renderMarkdownToContainer: (

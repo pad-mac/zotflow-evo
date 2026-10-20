@@ -91,4 +91,38 @@ export class NotificationService {
 
         new Notice(fragment, duration);
     }
+
+    /**
+     * ZotFlow Evo: a notice that stays while something long runs (OCR),
+     * with its text updated and, given `onCancel`, a Cancel button.
+     */
+    public progress(
+        message: string,
+        onCancel?: () => void,
+    ): { update(message: string): void; close(): void } {
+        const fragment = createFragment();
+        const container = fragment.createDiv({
+            cls: "zotflow-notice-container zotflow-evo-notice-progress",
+        });
+        const messageEl = container.createSpan({
+            text: message,
+            cls: "zotflow-notice-message",
+        });
+        if (onCancel) {
+            const button = container.createEl("button", {
+                text: "Cancel",
+                cls: "zotflow-evo-notice-cancel",
+            });
+            button.addEventListener("click", (e) => {
+                e.stopPropagation();
+                button.disabled = true;
+                onCancel();
+            });
+        }
+        const notice = new Notice(fragment, 0);
+        return {
+            update: (text: string) => messageEl.setText(text),
+            close: () => notice.hide(),
+        };
+    }
 }

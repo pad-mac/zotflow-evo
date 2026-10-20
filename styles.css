@@ -4894,3 +4894,41 @@ body.zotflow-evo-col-resizing * {
     height: 100%;
     min-height: 0;
 }
+
+/* ----- OCR languages in the settings ----- */
+
+.zotflow-evo-ocr-languages {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.zotflow-evo-ocr-language {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: var(--radius-s, 4px);
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-ocr-language-remove {
+    color: var(--text-faint);
+    cursor: pointer;
+}
+
+.zotflow-evo-ocr-language-remove:hover {
+    color: var(--text-error);
+}
+
+.zotflow-evo-notice-progress {
+    align-items: center;
+}
+
+.zotflow-evo-notice-cancel {
+    flex: none;
+    margin-inline-start: 12px;
+}

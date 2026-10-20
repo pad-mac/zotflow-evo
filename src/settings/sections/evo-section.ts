@@ -5,6 +5,14 @@
  * See FORK.md.
  */
 import { applyStripTabMode } from "ui/evo-strip/follow";
+import {
+    BUNDLED_OCR_LANGUAGES,
+    OCR_LANGUAGE_NAMES,
+    installOcrLanguage,
+    installedOcrLanguages,
+    isOcrLanguageCode,
+    removeOcrLanguage,
+} from "ui/reader/evo-ocr-languages";
 import { notifyReaderChromeChanged } from "ui/reader/chrome";
 import { ANNOTATION_COLORS } from "ui/editor/evo-drop";
 import { DEFAULT_DROP_LINK_TEMPLATE } from "settings/types";
@@ -14,6 +22,8 @@ import {
 } from "utils/evo-library-model";
 
 import type ZotFlow from "main";
+import { services } from "services/services";
+
 import type {
     Setting,
     SettingDefinitionItem,
@@ -247,6 +257,17 @@ export class EvoSection {
             },
             {
                 type: "group",
+                heading: "OCR",
+                items: [
+                    {
+                        name: "Languages",
+                        desc: "Recognizing the text of scanned PDFs (PDF editing menu in the note strip). English, German and French are part of the plugin. Others are downloaded here (Tesseract's models from jsDelivr, about 1–3 MB each) into the plugin's folder: Tesseract codes such as ita, spa, lat, grc, rus, chi_sim, separated by spaces.",
+                        render: (setting) => this.ocrLanguages(setting),
+                    },
+                ],
+            },
+            {
+                type: "group",
                 heading: "Links to source notes",
                 items: [
                     {
@@ -344,5 +365,76 @@ export class EvoSection {
                 .onChange((value) => write({ after: value }));
             text.inputEl.setAttribute("aria-label", "Text after");
         });
+    }
+
+    /** The OCR languages: those there are, and a field to download more. */
+    private ocrLanguages(setting: Setting) {
+        const list = setting.descEl.createDiv({
+            cls: "zotflow-evo-ocr-languages",
+        });
+        const show = async () => {
+            const installed = await installedOcrLanguages();
+            list.empty();
+            for (const code of installed) {
+                const chip = list.createSpan({
+                    cls: "zotflow-evo-ocr-language",
+                    text: OCR_LANGUAGE_NAMES[code] ?? code,
+                    attr: { title: code },
+                });
+                if (BUNDLED_OCR_LANGUAGES.includes(code)) continue;
+                const remove = chip.createSpan({
+                    cls: "zotflow-evo-ocr-language-remove",
+                    text: "×",
+                    attr: { "aria-label": `Remove ${code}` },
+                });
+                remove.addEventListener("click", () => {
+                    void removeOcrLanguage(code).then(show);
+                });
+            }
+        };
+        void show();
+        let codes = "";
+        setting.addText((text) => {
+            text.setPlaceholder("ita lat").onChange((value) => {
+                codes = value;
+            });
+        });
+        setting.addButton((button) =>
+            button.setButtonText("Install").onClick(async () => {
+                const wanted = codes
+                    .toLowerCase()
+                    .split(/[\s,;]+/)
+                    .filter(Boolean);
+                const bad = wanted.filter((c) => !isOcrLanguageCode(c));
+                if (bad.length) {
+                    services.notificationService.notify(
+                        "warning",
+                        `Not a Tesseract language code: ${bad.join(", ")}`,
+                    );
+                    return;
+                }
+                button.setDisabled(true);
+                for (const code of wanted) {
+                    try {
+                        services.notificationService.notify(
+                            "info",
+                            `Downloading the OCR language “${code}”…`,
+                        );
+                        await installOcrLanguage(code);
+                        services.notificationService.notify(
+                            "success",
+                            `OCR language “${code}” installed.`,
+                        );
+                    } catch (e) {
+                        services.notificationService.notify(
+                            "error",
+                            `Could not install “${code}”: ${e instanceof Error ? e.message : String(e)}`,
+                        );
+                    }
+                }
+                button.setDisabled(false);
+                await show();
+            }),
+        );
     }
 }
