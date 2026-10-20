@@ -25,6 +25,8 @@ import {
     ZotFlowErrorCode,
     errorMessage as describeError,
 } from "utils/error";
+import { pdfFilterKey } from "utils/evo-pdf-filter";
+import { runPdfEdit } from "ui/reader/pdf-edit";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import {
     attachReaderChromeControls,
@@ -106,6 +108,14 @@ export class ZoteroReaderView extends ItemView {
         return false;
     }
 
+    /** ZotFlow Evo: how this PDF's page filter is kept (`pdfFilterKey()`). */
+    private evoFilterKey(): string {
+        return pdfFilterKey({
+            libraryID: this.attachmentItem.libraryID,
+            key: this.attachmentItem.key,
+        });
+    }
+
     /** ZotFlow Evo: the attachment shown, for a subclass. */
     protected get evoAttachment(): IDBZoteroItem<AttachmentData> | undefined {
         return this.attachmentItem;
@@ -113,6 +123,22 @@ export class ZoteroReaderView extends ItemView {
 
     /** ZotFlow Evo: the reader has opened its document (for a subclass). */
     protected evoReaderOpened(bridge: IframeReaderBridge): void {}
+
+    /**
+     * ZotFlow Evo: open the attachment again, as this device now has it
+     * (after its file was rewritten, PDF editing).
+     */
+    protected async evoReload(): Promise<void> {
+        const { libraryID, key } = this.attachmentItem;
+        await this.teardownReader();
+        const item = await workerBridge.dbHelper.getAttachmentItem(
+            libraryID,
+            key,
+        );
+        if (!item) return;
+        this.attachmentItem = item;
+        ff(this.loadDocument(), "Failed to load the edited document");
+    }
 
     /** ZotFlow Evo: close the document shown (for a subclass). */
     protected async evoCloseDocument(): Promise<void> {
@@ -438,6 +464,21 @@ export class ZoteroReaderView extends ItemView {
                     this.handleOpenLink(evt.url);
                 });
 
+                // ZotFlow Evo: the PDF editing menu (pdf-edit.ts).
+                this.bridge.onEventType("pdfEditRequest", (evt) => {
+                    ff(
+                        runPdfEdit(
+                            {
+                                app: this.app,
+                                attachment: this.attachmentItem,
+                                reload: () => this.evoReload(),
+                            },
+                            evt.request,
+                        ),
+                        "PDF editing failed",
+                    );
+                });
+
                 this.bridge.onEventType("annotationsSaved", (evt) => {
                     ff(
                         this.handleAnnotationsSaved(evt.annotations),
@@ -625,7 +666,7 @@ export class ZoteroReaderView extends ItemView {
                 fontFamily: services.settings.epubFontFamily || undefined,
                 ...(this.evoStripOnly()
                     ? stripOnlyChromeOptions()
-                    : readerChromeOptions()),
+                    : readerChromeOptions(this.evoFilterKey())),
                 // ZotFlow Evo: open where a link pointed, not where reading stopped.
                 ...(this.pendingNavigation
                     ? { location: this.pendingNavigation }
@@ -679,7 +720,11 @@ export class ZoteroReaderView extends ItemView {
 
             // ZotFlow Evo: the line above the note strip; a link that arrived
             // while the document was opening.
-            connectNoteStrip(this.bridge, this.noteStripSubject());
+            connectNoteStrip(
+                this.bridge,
+                this.noteStripSubject(),
+                this.evoStripOnly() ? undefined : this.evoFilterKey(),
+            );
             this.evoReaderOpened(this.bridge);
             this.finishPendingNavigation(opts.location);
 

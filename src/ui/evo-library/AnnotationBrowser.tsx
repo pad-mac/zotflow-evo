@@ -17,13 +17,13 @@ import { services } from "services/services";
 import { openAnnotation } from "ui/evo-library/actions";
 import {
     AnnotationCard,
+    ColorSwatches,
     Icon,
     Title,
     useLibraryChanges,
 } from "ui/evo-library/parts";
 import {
     annotationColors,
-    colorName,
     groupAnnotations,
     itemReference,
 } from "utils/evo-library-model";
@@ -233,32 +233,11 @@ export function AnnotationBrowser({
                 >
                     <Icon name="folder-tree" />
                 </span>
-                <span
-                    className="zotflow-evo-swatches"
-                    role="group"
-                    aria-label="Show only these colours"
-                >
-                    {palette.map((hex) => (
-                        <span
-                            key={hex}
-                            className={
-                                "zotflow-evo-dot" +
-                                (colors.has(hex) ? " is-current" : "") +
-                                (colors.size && !colors.has(hex)
-                                    ? " is-dimmed"
-                                    : "")
-                            }
-                            style={
-                                {
-                                    "--zotflow-evo-color": hex,
-                                } as React.CSSProperties
-                            }
-                            title={`Only ${colorName(hex)}`}
-                            aria-pressed={colors.has(hex)}
-                            onClick={() => toggleColor(hex)}
-                        />
-                    ))}
-                </span>
+                <ColorSwatches
+                    palette={palette}
+                    current={colors}
+                    onToggle={toggleColor}
+                />
             </div>
             <div className="zotflow-evo-annos-list">
                 {!data && (

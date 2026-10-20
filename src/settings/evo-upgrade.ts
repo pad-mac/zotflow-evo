@@ -9,8 +9,12 @@ import {
 
 import {
     DEFAULT_ATTACH_FILENAME,
+    DEFAULT_COLLECTION_COLUMNS,
     PREVIOUS_ATTACH_FILENAMES,
 } from "utils/evo-library-model";
+
+/** The collection tab's columns until beta.9 (no annotation count). */
+const PREVIOUS_COLLECTION_COLUMNS = ["title", "creator", "year", "attachment"];
 
 import type { ZotFlowSettings } from "settings/types";
 
@@ -26,4 +30,13 @@ export function upgradeEvoSettings(settings: ZotFlowSettings): void {
     if (PREVIOUS_ATTACH_FILENAMES.includes(settings.evoAttachFilename)) {
         settings.evoAttachFilename = DEFAULT_ATTACH_FILENAME;
     }
+    const columns = settings.evoCollectionColumns;
+    if (
+        Array.isArray(columns) &&
+        columns.join() === PREVIOUS_COLLECTION_COLUMNS.join()
+    ) {
+        settings.evoCollectionColumns = [...DEFAULT_COLLECTION_COLUMNS];
+    }
+    // Until beta.9 one page filter for all PDFs; now one per PDF.
+    delete (settings as unknown as Record<string, unknown>).readerPdfFilter;
 }

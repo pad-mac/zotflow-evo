@@ -7,7 +7,6 @@ import {
 } from "utils/evo-library-model";
 
 import { DEFAULT_FULLTEXT_LAYOUT } from "utils/evo-fulltext";
-import { DEFAULT_PDF_FILTER } from "utils/evo-pdf-filter";
 
 import type { CustomReaderTheme } from "types/zotero-reader";
 import type { AnnotationLayout } from "utils/evo-library-model";
@@ -151,6 +150,8 @@ export interface ZotFlowSettings {
     evoCollectionOrder: Record<string, string[]>;
     /** ZotFlow Evo: the library browser shows the selected item on the right. */
     evoLibraryDetailsShown: boolean;
+    /** ZotFlow Evo: a collection tab shows the selected item (beside the table, or under it when narrow). */
+    evoCollectionDetailsShown: boolean;
     /** ZotFlow Evo: LiquidJS template for the name of a file saved to an item (without extension). */
     evoAttachFilename: string;
     /** ZotFlow Evo: Anna's Archive member key for its download API (kept in SecretStorage, not data.json). */
@@ -163,8 +164,16 @@ export interface ZotFlowSettings {
     evoFulltextWholeWords: boolean;
     /** ZotFlow Evo: sub-collections are indented under their parents in the library browser. */
     evoCollectionIndent: boolean;
-    /** ZotFlow Evo: colour filter over PDF pages (KOReader-like). */
-    readerPdfFilter: PdfFilter;
+    /**
+     * ZotFlow Evo: the page filter of each PDF (KOReader units), by
+     * `pdfFilterKey()` ("libraryID:key", or "vault:path").
+     */
+    readerPdfFilters: Record<string, PdfFilter>;
+    /**
+     * ZotFlow Evo: what the annotation strip tab shows: the reader's note
+     * strip (editable), or the library's item pane (read only, faster).
+     */
+    evoStripTabMode: "reader" | "item-pane";
     /** CSL renderer: default style id (slug or custom style key). */
     cslDefaultStyleId: string;
     /** CSL renderer: default output format. */
@@ -297,13 +306,15 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoPinnedCollections: [],
     evoCollectionOrder: {},
     evoLibraryDetailsShown: true,
+    evoCollectionDetailsShown: true,
     evoAttachFilename: DEFAULT_ATTACH_FILENAME,
     evoZoteroDataDir: "",
     evoFulltextLayout: { ...DEFAULT_FULLTEXT_LAYOUT },
     evoFulltextMatchCase: false,
     evoFulltextWholeWords: false,
     evoCollectionIndent: true,
-    readerPdfFilter: { ...DEFAULT_PDF_FILTER },
+    readerPdfFilters: {},
+    evoStripTabMode: "item-pane",
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

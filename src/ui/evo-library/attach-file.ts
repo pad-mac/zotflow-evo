@@ -239,6 +239,156 @@ function concat(...parts: (ArrayBuffer | Uint8Array)[]): ArrayBuffer {
     return out.buffer;
 }
 
+/**
+ * Put a file into Zotero's storage for an attachment item (Zotero's file
+ * upload: permission, the bytes, registration). `previousMd5`: the md5 the
+ * server has now, when the file is replaced (null: the item has none yet).
+ * Returns the new md5.
+ */
+export async function uploadFileBytes(
+    target: { libraryID: number; key: string },
+    bytes: ArrayBuffer | Uint8Array,
+    filename: string,
+    previousMd5: string | null,
+): Promise<string> {
+    const apiKey = services.settings.zoteroapikey;
+    const prefix = services.libraryCache.isGroup(target.libraryID)
+        ? `groups/${target.libraryID}`
+        : `users/${target.libraryID}`;
+    const fileUrl = `https://api.zotero.org/${prefix}/items/${target.key}/file`;
+    const buffer = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const md5 = SparkMD5.ArrayBuffer.hash(
+        buffer.buffer.slice(
+            buffer.byteOffset,
+            buffer.byteOffset + buffer.byteLength,
+        ) as ArrayBuffer,
+    );
+    const precondition: Record<string, string> = previousMd5
+        ? { "If-Match": previousMd5 }
+        : { "If-None-Match": "*" };
+    const form = (fields: Record<string, string | number>) =>
+        Object.entries(fields)
+            .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+            .join("&");
+    const auth = await requestUrl({
+        url: fileUrl,
+        method: "POST",
+        headers: { "Zotero-API-Key": apiKey, ...precondition },
+        contentType: "application/x-www-form-urlencoded",
+        body: form({
+            md5,
+            filename,
+            filesize: buffer.byteLength,
+            mtime: Date.now(),
+        }),
+        throw: false,
+    });
+    if (auth.status === 412)
+        throw new Error(
+            "The file in Zotero changed since this device last synced; sync, then try again.",
+        );
+    if (auth.status >= 300)
+        throw new Error(`Zotero refused the upload (${auth.status}).`);
+    const authJson = jsonOf<{
+        exists?: number;
+        url?: string;
+        contentType?: string;
+        prefix?: string;
+        suffix?: string;
+        uploadKey?: string;
+    }>(auth);
+    if (!authJson)
+        throw new Error("Zotero's answer to the upload was unreadable.");
+    if (authJson.exists) return md5;
+    if (!authJson.url || !authJson.uploadKey)
+        throw new Error("Zotero gave no upload address.");
+    const enc = new TextEncoder();
+    const sent = await requestUrl({
+        url: authJson.url,
+        method: "POST",
+        contentType: authJson.contentType,
+        body: concat(
+            enc.encode(authJson.prefix ?? ""),
+            buffer,
+            enc.encode(authJson.suffix ?? ""),
+        ),
+        throw: false,
+    });
+    if (sent.status >= 300)
+        throw new Error(`The file upload failed (${sent.status}).`);
+    const registered = await requestUrl({
+        url: fileUrl,
+        method: "POST",
+        headers: { "Zotero-API-Key": apiKey, ...precondition },
+        contentType: "application/x-www-form-urlencoded",
+        body: form({ upload: authJson.uploadKey }),
+        throw: false,
+    });
+    if (registered.status >= 300)
+        throw new Error(
+            `Zotero did not register the upload (${registered.status}).`,
+        );
+    return md5;
+}
+
+/**
+ * A new stored-file attachment without a parent item (a standalone PDF), in
+ * a collection or not, with its file. Returns its key.
+ */
+export async function createStandaloneAttachment(
+    libraryID: number,
+    collectionKey: string | null,
+    bytes: Uint8Array,
+    filename: string,
+    title: string,
+): Promise<string> {
+    const refusal = attachRefusal(libraryID);
+    if (refusal) throw new Error(refusal);
+    const prefix = services.libraryCache.isGroup(libraryID)
+        ? `groups/${libraryID}`
+        : `users/${libraryID}`;
+    const created = await requestUrl({
+        url: `https://api.zotero.org/${prefix}/items`,
+        method: "POST",
+        headers: {
+            "Zotero-API-Key": services.settings.zoteroapikey,
+            "Zotero-API-Version": "3",
+            "Zotero-Write-Token": writeToken(),
+        },
+        contentType: "application/json",
+        body: JSON.stringify([
+            {
+                itemType: "attachment",
+                linkMode: "imported_file",
+                title,
+                accessDate: "",
+                url: "",
+                note: "",
+                contentType: "application/pdf",
+                charset: "",
+                filename,
+                md5: null,
+                mtime: null,
+                collections: collectionKey ? [collectionKey] : [],
+                tags: [],
+                relations: {},
+            },
+        ]),
+        throw: false,
+    });
+    const json = jsonOf<{
+        successful?: Record<string, { key?: string }>;
+        failed?: Record<string, { message?: string }>;
+    }>(created);
+    const key = json?.successful?.["0"]?.key;
+    if (created.status >= 300 || !key)
+        throw new Error(
+            `Zotero refused the new PDF (${created.status}${json?.failed?.["0"]?.message ? ": " + json.failed["0"].message : ""}).`,
+        );
+    await uploadFileBytes({ libraryID, key }, bytes, filename, null);
+    return key;
+}
+
 /** Why this item cannot take a file from here, or null. */
 export function attachRefusal(libraryID: number): string | null {
     const cache = services.libraryCache;
@@ -324,71 +474,13 @@ export async function uploadAttachment(
         );
     }
 
-    // 2. Permission to upload the file.
-    const md5 = SparkMD5.ArrayBuffer.hash(file.bytes);
-    const fileUrl = `${api}/items/${attachmentKey}/file`;
-    const form = (fields: Record<string, string | number>) =>
-        Object.entries(fields)
-            .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-            .join("&");
-    const auth = await requestUrl({
-        url: fileUrl,
-        method: "POST",
-        headers: { "Zotero-API-Key": apiKey, "If-None-Match": "*" },
-        contentType: "application/x-www-form-urlencoded",
-        body: form({
-            md5,
-            filename,
-            filesize: file.bytes.byteLength,
-            mtime: Date.now(),
-        }),
-        throw: false,
-    });
-    if (auth.status >= 300)
-        throw new Error(`Zotero refused the upload (${auth.status}).`);
-    const authJson = jsonOf<{
-        exists?: number;
-        url?: string;
-        contentType?: string;
-        prefix?: string;
-        suffix?: string;
-        uploadKey?: string;
-    }>(auth);
-    if (!authJson)
-        throw new Error("Zotero's answer to the upload was unreadable.");
-
-    if (!authJson.exists) {
-        if (!authJson.url || !authJson.uploadKey)
-            throw new Error("Zotero gave no upload address.");
-        // 3. The file itself.
-        const enc = new TextEncoder();
-        const sent = await requestUrl({
-            url: authJson.url,
-            method: "POST",
-            contentType: authJson.contentType,
-            body: concat(
-                enc.encode(authJson.prefix ?? ""),
-                file.bytes,
-                enc.encode(authJson.suffix ?? ""),
-            ),
-            throw: false,
-        });
-        if (sent.status >= 300)
-            throw new Error(`The file upload failed (${sent.status}).`);
-        // 4. Done.
-        const registered = await requestUrl({
-            url: fileUrl,
-            method: "POST",
-            headers: { "Zotero-API-Key": apiKey, "If-None-Match": "*" },
-            contentType: "application/x-www-form-urlencoded",
-            body: form({ upload: authJson.uploadKey }),
-            throw: false,
-        });
-        if (registered.status >= 300)
-            throw new Error(
-                `Zotero did not register the upload (${registered.status}).`,
-            );
-    }
+    // 2–4. The file, into Zotero's storage.
+    await uploadFileBytes(
+        { libraryID: target.libraryID, key: attachmentKey },
+        file.bytes,
+        filename,
+        null,
+    );
 
     // Bring the new attachment here.
     void startSync(target.libraryID, true).catch(() => {

@@ -23,6 +23,7 @@ import {
     getLocalReaderDocumentKey,
 } from "services/reader-document-cache";
 import { errorMessage as describeError } from "utils/error";
+import { pdfFilterKey } from "utils/evo-pdf-filter";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import {
     attachReaderChromeControls,
@@ -437,11 +438,11 @@ export class LocalReaderView extends ItemView {
                     autoDisableTextTool: autoDisable,
                     autoDisableImageTool: autoDisable,
                     fontFamily: services.settings.epubFontFamily || undefined,
-                    ...readerChromeOptions(),
-                // ZotFlow Evo: open where a link pointed, not where reading stopped.
-                ...(this.pendingNavigation
-                    ? { location: this.pendingNavigation }
-                    : {}),
+                    ...readerChromeOptions(pdfFilterKey({ path: file.path })),
+                    // ZotFlow Evo: open where a link pointed, not where reading stopped.
+                    ...(this.pendingNavigation
+                        ? { location: this.pendingNavigation }
+                        : {}),
                     ...themeOverrides,
                 };
 
@@ -454,7 +455,11 @@ export class LocalReaderView extends ItemView {
                 readerInitialized = true;
                 // ZotFlow Evo: the line above the note strip; a link that
                 // arrived while the document was opening.
-                connectNoteStrip(this.bridge, { text: file.basename });
+                connectNoteStrip(
+                    this.bridge,
+                    { text: file.basename },
+                    pdfFilterKey({ path: file.path }),
+                );
                 this.finishPendingNavigation(opts.location);
             } catch (e) {
                 // If another Promise rejected first, release the lease when its

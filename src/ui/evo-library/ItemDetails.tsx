@@ -7,7 +7,13 @@
  * scroll on their own too. See FORK.md.
  */
 import { Keymap, Menu } from "obsidian";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 
 import { workerBridge } from "bridge";
 import { services } from "services/services";
@@ -20,10 +26,13 @@ import {
 import { onSelection, lastSelection } from "ui/evo-library/selection";
 import {
     AnnotationCard,
+    ColorSwatches,
     Icon,
     Title,
+    useColorFilter,
     useLibraryChanges,
 } from "ui/evo-library/parts";
+import { annotationColors } from "utils/evo-library-model";
 import { notifyLinkedFile, openAttachment } from "utils/viewer";
 
 import type { App, WorkspaceLeaf } from "obsidian";
@@ -124,6 +133,14 @@ export function ItemDetails({
     count,
     emptyText,
 }: ItemDetailsProps) {
+    // The colour filter stays while the selection moves (colours the item
+    // does not use are left out of it).
+    const filter = useColorFilter();
+    const annotations = details?.annotations;
+    const palette = useMemo(
+        () => annotationColors(annotations ?? []),
+        [annotations],
+    );
     if (!details) {
         return (
             <div className="zotflow-evo-details is-empty">
@@ -139,7 +156,13 @@ export function ItemDetails({
     );
     const regular =
         details.itemType !== "attachment" && details.itemType !== "note";
-    const cards: CardAnnotation[] = details.annotations.map((a) => ({
+    const picked = palette.filter((hex) => filter.colors.has(hex));
+    const shown = picked.length
+        ? details.annotations.filter((a) =>
+              picked.includes((a.color ?? "").toLowerCase()),
+          )
+        : details.annotations;
+    const cards: CardAnnotation[] = shown.map((a) => ({
         id: a.id,
         libraryID: details.libraryID,
         attachmentKey: a.attachmentKey,
@@ -263,8 +286,23 @@ export function ItemDetails({
                     {details.abstract}
                 </div>
             )}
-            {cards.length > 0 && (
+            {details.annotations.length > 0 && (
                 <div className="zotflow-evo-details-annotations">
+                    {palette.length > 1 && (
+                        <div className="zotflow-evo-details-annohead">
+                            <span className="zotflow-evo-details-annocount">
+                                {picked.length
+                                    ? `${cards.length} of ${details.annotations.length}`
+                                    : details.annotations.length}
+                            </span>
+                            <ColorSwatches
+                                palette={palette}
+                                current={filter.colors}
+                                onToggle={filter.toggle}
+                                onClear={filter.clear}
+                            />
+                        </div>
+                    )}
                     {cards.map((card) => (
                         <AnnotationCard
                             key={card.id}

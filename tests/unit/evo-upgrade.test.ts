@@ -42,4 +42,25 @@ describe("upgradeEvoSettings", () => {
         upgradeEvoSettings(s);
         expect(s.evoDropLinkTemplate).toBe(DEFAULT_DROP_LINK_TEMPLATE);
     });
+
+    it("the collection tab's columns of beta.9 get the annotation count; own choices stay", () => {
+        const old = settings({
+            evoCollectionColumns: ["title", "creator", "year", "attachment"],
+        });
+        upgradeEvoSettings(old);
+        expect(old.evoCollectionColumns).toContain("annotations");
+        const own = settings({ evoCollectionColumns: ["title", "year"] });
+        upgradeEvoSettings(own);
+        expect(own.evoCollectionColumns).toEqual(["title", "year"]);
+    });
+
+    it("the one page filter for all PDFs (until beta.9) is dropped", () => {
+        const s = settings({});
+        (s as unknown as Record<string, unknown>).readerPdfFilter = {
+            contrast: 2,
+        };
+        upgradeEvoSettings(s);
+        expect("readerPdfFilter" in s).toBe(false);
+        expect(s.readerPdfFilters).toEqual({});
+    });
 });

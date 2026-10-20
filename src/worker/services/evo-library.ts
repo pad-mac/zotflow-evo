@@ -9,6 +9,7 @@ import { Liquid } from "liquidjs";
 import { db, getCombinations } from "db/db";
 import { getAnnotationJson } from "db/annotation";
 import { mutateItems } from "db/mutate";
+import { remapPosition, sortIndexOnPage } from "utils/evo-pdf-geometry";
 import { normalizeCollection } from "db/normalize";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
 import {
@@ -32,6 +33,7 @@ import type { LibraryService } from "./library";
 import type { IParentProxy } from "bridge/types";
 import type { ZotFlowSettings } from "settings/types";
 import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
+import type { PagePlan, PdfPosition } from "utils/evo-pdf-geometry";
 import type { ZoteroCollection } from "types/zotero";
 import type { AnnotationJSON } from "types/zotero-reader";
 import type {
@@ -450,6 +452,72 @@ export class EvoLibraryService {
             .catch(() => 0);
         this.parentHost?.emit("treeChanged");
         return { status: "renamed", name: change.filename, problem };
+    }
+
+    /**
+     * The annotations of a PDF that was rewritten (PDF editing): each moved
+     * to its page in the new file and turned with it (`plans`, from
+     * evo-pdf-geometry). With `relabel`, page labels become page numbers
+     * (the file's page labels were removed). Local edits, synced as usual.
+     */
+    async remapAnnotations(
+        libraryID: number,
+        attachmentKey: string,
+        plans: PagePlan[],
+        relabel: boolean,
+    ): Promise<EvoEditResult> {
+        await this.assertWritable(libraryID);
+        const annotations = await db.items
+            .where(["libraryID", "parentItem", "itemType", "trashed"])
+            .anyOf(
+                getCombinations([
+                    [libraryID],
+                    [attachmentKey],
+                    ["annotation"],
+                    [0, 1],
+                ]),
+            )
+            .toArray();
+        const edits: { key: string; edit: (data: object) => void }[] = [];
+        for (const item of annotations) {
+            const data = item.raw.data as {
+                annotationPosition?: string;
+                annotationSortIndex?: string;
+                annotationPageLabel?: string;
+            };
+            let position: PdfPosition;
+            try {
+                position = JSON.parse(
+                    data.annotationPosition ?? "",
+                ) as PdfPosition;
+            } catch {
+                continue;
+            }
+            const moved = remapPosition(position, plans);
+            if (!moved) continue;
+            const label = relabel ? String(moved.pageIndex + 1) : undefined;
+            if (
+                JSON.stringify(moved) === JSON.stringify(position) &&
+                (label === undefined || label === data.annotationPageLabel)
+            )
+                continue;
+            edits.push({
+                key: item.key,
+                edit: (d) => {
+                    const fields = d as typeof data;
+                    fields.annotationPosition = JSON.stringify(moved);
+                    fields.annotationSortIndex = sortIndexOnPage(
+                        fields.annotationSortIndex ?? "",
+                        moved.pageIndex,
+                    );
+                    if (label !== undefined) fields.annotationPageLabel = label;
+                },
+            });
+        }
+        if (!edits.length) return { changed: 0, skipped: 0 };
+        const written = await mutateItems(libraryID, edits);
+        const changed = written.filter(Boolean).length;
+        return { changed, skipped: edits.length - changed };
     }
 
     /** Bring items back from the trash. */

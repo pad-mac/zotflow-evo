@@ -4,6 +4,7 @@
  * library browser, automatic sync.
  * See FORK.md.
  */
+import { applyStripTabMode } from "ui/evo-strip/follow";
 import { notifyReaderChromeChanged } from "ui/reader/chrome";
 import { ANNOTATION_COLORS } from "ui/editor/evo-drop";
 import { DEFAULT_DROP_LINK_TEMPLATE } from "settings/types";
@@ -91,6 +92,30 @@ export class EvoSection {
                                     notifyReaderChromeChanged();
                                     await this.plugin.saveSettings();
                                 });
+                            });
+                        },
+                    },
+                    {
+                        name: "Annotation strip tab",
+                        desc: "What the tab that follows the line being written shows (command “Open annotation strip”). Note strip: the reader's strip, with editing; it loads the PDF out of sight. Item pane: the library's right pane (files, abstract, annotations with the colour filter); it shows at once, without editing.",
+                        render: (setting) => {
+                            setting.addDropdown((dropdown) => {
+                                dropdown
+                                    .addOption("reader", "Note strip")
+                                    .addOption("item-pane", "Item pane")
+                                    .setValue(
+                                        this.plugin.settings.evoStripTabMode,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoStripTabMode =
+                                            value === "item-pane"
+                                                ? "item-pane"
+                                                : "reader";
+                                        await this.plugin.saveSettings();
+                                        await applyStripTabMode(
+                                            this.plugin.app,
+                                        );
+                                    });
                             });
                         },
                     },

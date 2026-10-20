@@ -77,8 +77,15 @@ export interface ReaderNoteStrip {
      * the header is hidden (a click comes back as `noteStripAction`).
      */
     actions?: NoteStripAction[];
-    /** Colour filter over PDF pages (KOReader-like). */
-    pdfFilter?: { whiteThreshold: number; contrast: number; saturation: number };
+    /**
+     * This PDF's page filter (KOReader units, see utils/evo-pdf-filter.ts);
+     * null: none kept for it (one written into the PDF is used).
+     */
+    pdfFilter?: {
+        contrast: number;
+        whiteThreshold: number;
+        saturation: number;
+    } | null;
     /**
      * The strip alone (the annotation strip tab): the document is loaded but
      * not shown; entries open in a reader (`noteStripOpen`).
@@ -112,6 +119,8 @@ export type ChildEvents =
     /** ZotFlow Evo: a mirrored header button was clicked in the note strip, at x/y of the reader's document. */
     | { type: "noteStripAction"; id: string; x: number; y: number }
     | { type: "noteStripOpen"; location: Record<string, unknown> }
+    | { type: "pageInfo"; label: string; index: number; count: number }
+    | { type: "pdfEditRequest"; request: PdfEditRequest }
     | {
           type: "openTagsPopup";
           annotationID: unknown;
@@ -197,6 +206,11 @@ export type ParentAPI = {
         container: HTMLElement,
         text: string,
     ) => { unload: () => void };
+    /**
+     * ZotFlow Evo: the collections of the open attachment's library, as
+     * paths ("Media theory / Kittler"), for the PDF editing menu.
+     */
+    evoListCollections?: () => Promise<{ key: string; path: string }[]>;
 };
 
 /** The upstream Reader owns successful SDT results for the lifetime of its document. */
@@ -279,4 +293,22 @@ export interface CustomReaderTheme {
     label: string;
     background: string;
     foreground: string;
+}
+
+/**
+ * ZotFlow Evo: what the PDF editing menu asks of the plugin (see
+ * `src/evo/pdf-edit-panel.js` in the reader and `ui/reader/pdf-edit.ts`).
+ */
+export interface PdfEditRequest {
+    /** Cut pages in two: fractions of each page's width as shown. */
+    split?: { shared: number; pages: Record<string, number> };
+    /** Pages to turn level: degrees each (positive: lines go down to the right). */
+    straighten?: Record<string, number>;
+    removeOutline?: boolean;
+    /** Copy pages (0-based) into a new PDF in a collection. */
+    extract?: { pages: number[]; collectionKey: string | null; open: boolean };
+    /** The page filter, written into the PDF whenever it is rewritten. */
+    pageFilter?: { contrast: number; whiteThreshold: number; saturation: number };
+    /** Rewrite the PDF only to store the page filter. */
+    saveFilter?: boolean;
 }

@@ -9,7 +9,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { services } from "services/services";
 import { setAnnotationDrag } from "ui/evo-library/actions";
-import { titleRuns } from "utils/evo-library-model";
+import { colorName, titleRuns } from "utils/evo-library-model";
 
 import type { DraggedAnnotation } from "ui/evo-library/actions";
 
@@ -260,4 +260,66 @@ export function useLibraryChanges(refresh: () => void, delay = 400) {
             offs.forEach((off) => off());
         };
     }, [delay]);
+}
+
+/**
+ * The colours in use, as dots: a click shows only that colour (several
+ * can be picked), a second click shows it no more. `current` holds the
+ * colours picked (lower-case hex).
+ */
+export function ColorSwatches({
+    palette,
+    current,
+    onToggle,
+    onClear,
+}: {
+    palette: readonly string[];
+    current: ReadonlySet<string>;
+    onToggle: (hex: string) => void;
+    onClear?: () => void;
+}) {
+    if (palette.length < 2 && current.size === 0) return null;
+    const active = palette.filter((hex) => current.has(hex));
+    return (
+        <span
+            className="zotflow-evo-swatches"
+            role="group"
+            aria-label="Show only these colours"
+            onDoubleClick={onClear}
+        >
+            {palette.map((hex) => (
+                <span
+                    key={hex}
+                    className={
+                        "zotflow-evo-dot" +
+                        (current.has(hex) ? " is-current" : "") +
+                        (active.length && !current.has(hex) ? " is-dimmed" : "")
+                    }
+                    style={
+                        { "--zotflow-evo-color": hex } as React.CSSProperties
+                    }
+                    title={
+                        current.has(hex)
+                            ? `Show ${colorName(hex)} no more`
+                            : `Only ${colorName(hex)}`
+                    }
+                    aria-pressed={current.has(hex)}
+                    onClick={() => onToggle(hex)}
+                />
+            ))}
+        </span>
+    );
+}
+
+/** The colours picked in a `ColorSwatches`, and a toggle. */
+export function useColorFilter() {
+    const [colors, setColors] = useState<Set<string>>(() => new Set());
+    const toggle = (hex: string) =>
+        setColors((current) => {
+            const next = new Set(current);
+            if (!next.delete(hex)) next.add(hex);
+            return next;
+        });
+    const clear = () => setColors(new Set());
+    return { colors, toggle, clear };
 }

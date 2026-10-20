@@ -1,7 +1,9 @@
 /**
  * ZotFlow Evo (fork): one collection in a tab of its own — its name on top
  * and a table of its items, for a narrow pane. Opened from the library
- * browser (Ctrl+right-click or middle click on a collection). See FORK.md.
+ * browser (Ctrl+right-click or middle click on a collection). The selected
+ * item is shown beside the table as in the library browser, or under it
+ * when the tab is narrow (a button in the toolbar hides it). See FORK.md.
  */
 import React, {
     useCallback,
@@ -19,8 +21,10 @@ import {
     openFulltextSearch,
     openBookSearch,
     openItem,
+    revealInLibrary,
     setItemsDrag,
 } from "ui/evo-library/actions";
+import { ItemDetails, useItemDetails } from "ui/evo-library/ItemDetails";
 import { ItemTable } from "ui/evo-library/ItemTable";
 import { showItemMenu, showSortMenu } from "ui/evo-library/menus";
 import {
@@ -125,6 +129,25 @@ export function CollectionTab({
     const editing = useRowEditing(stableScope, sel, bodyRef);
 
     const focused = sel.shown.find((r) => r.key === sel.focusKey) ?? null;
+    const [detailsShown, setDetailsShown] = useState(
+        services.settings.evoCollectionDetailsShown !== false,
+    );
+    const details = useItemDetails(detailsShown ? focused : null);
+    const toggleDetails = useCallback(() => {
+        setDetailsShown((on) => {
+            services.settings.evoCollectionDetailsShown = !on;
+            void services
+                .saveSettings()
+                .catch((e: unknown) =>
+                    services.logService.error(
+                        "Failed to save the collection tab settings",
+                        "EvoLibrary",
+                        e,
+                    ),
+                );
+            return !on;
+        });
+    }, []);
     useEffect(() => {
         if (focused)
             publishSelection({
@@ -214,51 +237,96 @@ export function CollectionTab({
                 >
                     <Icon name="text-search" fallback="search" />
                 </span>
+                <span
+                    className={
+                        "zotflow-evo-tool" + (detailsShown ? " is-on" : "")
+                    }
+                    title={
+                        detailsShown
+                            ? "Hide the item pane"
+                            : "Show the item pane"
+                    }
+                    aria-pressed={detailsShown}
+                    onClick={toggleDetails}
+                >
+                    <Icon name="panel-right" />
+                </span>
             </div>
-            <ItemTable
-                rows={sel.shown}
-                columns={table.columns}
-                widths={table.widths}
-                sort={table.sort}
-                selected={sel.selected}
-                focusKey={sel.focusKey}
-                prompt={editing.prompt}
-                bodyRef={bodyRef}
-                emptyText={
-                    loading
-                        ? "Loading…"
-                        : filter
-                          ? "Nothing matches the filter."
-                          : "No items."
+            <div
+                className={
+                    "zotflow-evo-colltab-body" +
+                    (detailsShown ? " has-details" : "")
                 }
-                onSort={table.toggleSort}
-                onColumns={table.setColumns}
-                onWidths={table.setWidths}
-                onSelect={sel.select}
-                onSelectAll={sel.selectAll}
-                onMove={sel.move}
-                onOpen={(row) => openItem(app, row.libraryID, row.key)}
-                onMenu={(row, e) => {
-                    if (!sel.selected.has(row.key))
-                        sel.select(row, {
-                            ctrlKey: false,
-                            metaKey: false,
-                            shiftKey: false,
-                        });
-                    showItemMenu(app, leaf, row, e.nativeEvent, {
-                        onRemove:
-                            scope.collectionKey !== null
-                                ? () => editing.ask(false)
-                                : undefined,
-                        onTrash: () => editing.ask(true),
-                    });
-                }}
-                onDragRows={dragRows}
-                onSearch={(row) => void openBookSearch(app, leaf, row)}
-                onDeleteKey={editing.ask}
-                onPromptConfirm={editing.confirm}
-                onPromptCancel={editing.cancel}
-            />
+            >
+                <div className="zotflow-evo-colltab-items">
+                    <ItemTable
+                        rows={sel.shown}
+                        columns={table.columns}
+                        widths={table.widths}
+                        sort={table.sort}
+                        selected={sel.selected}
+                        focusKey={sel.focusKey}
+                        prompt={editing.prompt}
+                        bodyRef={bodyRef}
+                        emptyText={
+                            loading
+                                ? "Loading…"
+                                : filter
+                                  ? "Nothing matches the filter."
+                                  : "No items."
+                        }
+                        onSort={table.toggleSort}
+                        onColumns={table.setColumns}
+                        onWidths={table.setWidths}
+                        onSelect={sel.select}
+                        onSelectAll={sel.selectAll}
+                        onMove={sel.move}
+                        onOpen={(row) => openItem(app, row.libraryID, row.key)}
+                        onMenu={(row, e) => {
+                            if (!sel.selected.has(row.key))
+                                sel.select(row, {
+                                    ctrlKey: false,
+                                    metaKey: false,
+                                    shiftKey: false,
+                                });
+                            showItemMenu(app, leaf, row, e.nativeEvent, {
+                                onRemove:
+                                    scope.collectionKey !== null
+                                        ? () => editing.ask(false)
+                                        : undefined,
+                                onTrash: () => editing.ask(true),
+                            });
+                        }}
+                        onDragRows={dragRows}
+                        onSearch={(row) => void openBookSearch(app, leaf, row)}
+                        onDeleteKey={editing.ask}
+                        onPromptConfirm={editing.confirm}
+                        onPromptCancel={editing.cancel}
+                    />
+                </div>
+                {detailsShown && (
+                    <div className="zotflow-evo-pane is-details">
+                        <ItemDetails
+                            app={app}
+                            leaf={leaf}
+                            details={details}
+                            count={sel.selected.size}
+                            onShowInCollection={(
+                                libraryID,
+                                collectionKey,
+                                itemKey,
+                            ) =>
+                                void revealInLibrary(
+                                    app,
+                                    libraryID,
+                                    collectionKey,
+                                    itemKey,
+                                )
+                            }
+                        />
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

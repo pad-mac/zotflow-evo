@@ -13,7 +13,7 @@ import { EventBus } from "services/event-bus";
 import { services } from "services/services";
 import { revealInLibrary } from "ui/evo-library/actions";
 import { fireAndForgetIn } from "utils/fire-and-forget";
-import { sanitizePdfFilter } from "utils/evo-pdf-filter";
+import { isNeutralPdfFilter, sanitizePdfFilter } from "utils/evo-pdf-filter";
 
 import type { ItemView, Plugin } from "obsidian";
 import type {
@@ -63,14 +63,35 @@ function canAnchorNoteStrip(type: string | undefined): boolean {
  * without its banner, which needs the item's metadata from the worker; the
  * views send it with `connectNoteStrip()` once the reader is open.
  */
-export function readerChromeOptions(): Pick<
-    CreateReaderOptions,
-    "toolbarHidden" | "noteStrip"
-> {
+export function readerChromeOptions(
+    filterKey?: string,
+): Pick<CreateReaderOptions, "toolbarHidden" | "noteStrip"> {
     return {
         toolbarHidden: services.settings.readerToolbarHidden,
-        noteStrip: noteStripSettings(),
+        noteStrip: {
+            ...noteStripSettings(),
+            pdfFilter: pdfFilterFor(filterKey),
+        },
     };
+}
+
+/**
+ * This PDF's page filter, or null when none is kept for it (the reader then
+ * takes one written into the PDF, if there is one).
+ */
+function pdfFilterFor(filterKey: string | undefined) {
+    if (!filterKey) return null;
+    return sanitizePdfFilter(services.settings.readerPdfFilters?.[filterKey]);
+}
+
+/** Keep (or, neutral, forget) a PDF's page filter. */
+export function setPdfFilter(filterKey: string, value: unknown) {
+    const filters = { ...(services.settings.readerPdfFilters ?? {}) };
+    const filter = sanitizePdfFilter(value);
+    if (!filter || isNeutralPdfFilter(filter)) delete filters[filterKey];
+    else filters[filterKey] = filter;
+    services.settings.readerPdfFilters = filters;
+    ff(services.saveSettings(), "Failed to save the page filter");
 }
 
 function setChromeSetting(setting: ChromeSetting, value: boolean) {
@@ -119,6 +140,8 @@ export function notifyReaderChromeChanged() {
 function stripOnlySettings(): ReaderNoteStrip {
     return {
         ...noteStripSettings(),
+        // The pages are not shown: no filter to draw them with.
+        pdfFilter: null,
         visible: true,
         collapsed: true,
         stripOnly: true,
@@ -207,7 +230,6 @@ function noteStripSettings(): ReaderNoteStrip {
         collapsed: settings.readerNoteStripList,
         width: settings.readerNoteStripWidth,
         highlights: settings.readerNoteStripHighlights,
-        pdfFilter: sanitizePdfFilter(settings.readerPdfFilter),
     };
 }
 
@@ -240,6 +262,8 @@ async function renderNoteStripBanner(
 const bannerRuns = new WeakMap<IframeReaderBridge, number>();
 /** Readers whose strip already reports its own changes to this module. */
 const listening = new WeakSet<IframeReaderBridge>();
+/** The PDF each reader shows, for its page filter (`pdfFilterKey()`). */
+const filterKeys = new WeakMap<IframeReaderBridge, string>();
 
 /**
  * Render the line above the note strip for `subject` and send it to the
@@ -270,8 +294,10 @@ function sendNoteStripBanner(
 export function connectNoteStrip(
     bridge: IframeReaderBridge | undefined,
     subject: NoteStripSubject | undefined,
+    filterKey?: string,
 ) {
     if (!bridge) return;
+    if (filterKey) filterKeys.set(bridge, filterKey);
     if (!listening.has(bridge)) {
         listening.add(bridge);
         bridge.onEventType("noteStripChanged", (event) => {
@@ -279,13 +305,9 @@ export function connectNoteStrip(
             if (typeof highlights === "boolean") {
                 setChromeSetting("readerNoteStripHighlights", highlights);
             }
-            // The page filter set in one reader: kept, and every reader follows.
-            if (pdfFilter) {
-                services.settings.readerPdfFilter =
-                    sanitizePdfFilter(pdfFilter);
-                chromeChanged.emit();
-                ff(services.saveSettings(), "Failed to save the page filter");
-            }
+            // The page filter is this PDF's: kept for it alone.
+            const key = filterKeys.get(bridge);
+            if (pdfFilter && key) setPdfFilter(key, pdfFilter);
             // Dragged wider or narrower in the reader: every reader follows.
             if (
                 typeof width === "number" &&
@@ -350,6 +372,12 @@ class ReaderChromeControls {
     private readonly toolbarAction: HTMLElement;
     private readonly stripAction: HTMLElement;
     private readonly stripListAction: HTMLElement;
+    /**
+     * The page being read, in the view's header (shown with the header,
+     * i.e. while the note strip is hidden; beside the strip the reader shows
+     * it itself).
+     */
+    private readonly pageInfoEl: HTMLElement;
     /** What was last sent to the strip, to send only changes. */
     private sentActions = "";
     private readonly withActionListener = new WeakSet<IframeReaderBridge>();
@@ -383,6 +411,14 @@ class ReaderChromeControls {
             this.toolbarAction,
         ])
             el.dataset.zfEvoChrome = "1";
+        this.pageInfoEl = createDiv({ cls: "zotflow-evo-header-page" });
+        const actions = view.containerEl.querySelector(".view-actions");
+        if (actions) actions.before(this.pageInfoEl);
+        else
+            view.containerEl
+                .querySelector(".view-header")
+                ?.appendChild(this.pageInfoEl);
+        view.register(() => this.pageInfoEl.remove());
         view.register(chromeChanged.subscribe(() => this.apply()));
         view.register(
             readerOpened.subscribe((bridge) => {
@@ -437,6 +473,19 @@ class ReaderChromeControls {
     private listenForActions(bridge: IframeReaderBridge) {
         if (this.withActionListener.has(bridge)) return;
         this.withActionListener.add(bridge);
+        this.pageInfoEl.empty();
+        bridge.onEventType("pageInfo", (event) => {
+            if (bridge !== this.getBridge()) return;
+            this.pageInfoEl.empty();
+            this.pageInfoEl.createSpan({
+                cls: "zotflow-evo-header-page-label",
+                text: event.label,
+            });
+            this.pageInfoEl.createSpan({
+                cls: "zotflow-evo-header-page-number",
+                text: `${event.index + 1} / ${event.count}`,
+            });
+        });
         bridge.onEventType("noteStripAction", (event) => {
             const frame = this.view.containerEl.querySelector("iframe");
             const box = frame?.getBoundingClientRect();

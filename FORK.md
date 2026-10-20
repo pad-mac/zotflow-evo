@@ -78,8 +78,24 @@ Keep this list complete. One entry per change, newest last.
 | Reader, beta.9: the strip mirrors only the fork's toggles at last (beta.8 marked them but did not filter: the bookmark, more options and "Open source note" buttons were still in the strip); the title's menu closes on the first click outside it, also in the reader (a cover under the menu takes that click) | `headerActions()`, `showMenuOverFrame()` in `chrome.ts`; `.zotflow-evo-menu-cover` in `styles.css` | Fixes. |
 | Groundwork, beta.9: the schema generator also writes the fields and creator types of each item type and Zotero's CSL-JSON mapping, for making an item from a DOI later. Nothing uses it yet | `scripts/generate-zotero-item-schema.js`; `src/types/zotero-csl-schema.ts` (generated) | Adding items by DOI, ISBN or URL was set aside: Zotero's own tools do it. |
 | The full-text worker is stopped when the plugin unloads (beta.8 imported the stop but did not register it) | `registerEvoLibrary()` in `views.tsx` | Fix. |
+| Library, beta.10: a collection tab has the annotation count column (added to a column choice stored untouched since beta.9) and the item pane, beside the table or under it when the tab is narrower than 620 px (a container query), with a button to hide it (`evoCollectionDetailsShown`); the item pane's annotations have the colour filter (dots, several at once; double-click clears), in the library browser, the item tab, the collection tab and the strip tab alike | `CollectionTab.tsx`; `ColorSwatches`, `useColorFilter` in `parts.tsx` (also used by the annotation browser); `ItemDetails.tsx`; `upgradeEvoSettings()`; `styles.css` | Requested. |
+| Annotation strip tab, beta.10: the setting "Annotation strip tab" chooses between the reader's note strip and the library's item pane (`evoStripTabMode`, default `item-pane`). Open strip tabs are turned into the chosen kind | `EvoStripPaneView` in `src/ui/evo-strip/pane-view.tsx`; `openStripTab()`, `applyStripTabMode()` in `follow.ts`; `evo-section.ts` | Requested: as quick as the item pane, without editing. |
+| Page filter, beta.10: kept per PDF (`readerPdfFilters`, keyed `libraryID:key` or `vault:path`), no longer one for all; the old `readerPdfFilter` is dropped. With none kept for a PDF, the reader uses one written into the PDF (Info key `ZotFlowEvoPageFilter`, JSON in KOReader's units) | `src/utils/evo-pdf-filter.ts`; `readerChromeOptions(filterKey)`, `connectNoteStrip(…, filterKey)` in `chrome.ts`; `view.ts`, `local-view.ts` | Requested ("store it per PDF", "inside the PDF metadata" for a KOReader plugin). |
+| The reader's page number in the tab bar when the note strip is hidden (label, page / pages, tabular figures), from the reader's `pageInfo` event | `pageInfoEl` of `ReaderChromeControls` in `chrome.ts`; `.zotflow-evo-header-page` | Requested. |
+| PDF editing, beta.10: the reader's editing menu (`pdfEditRequest`) is carried out here. The file is rewritten with pdf-lib: split (the page keeps the left part by its boxes; a copy of the page dictionary sharing content and resources shows the right part; page labels removed), straighten (one `cm` rotation around the centre of what is shown, at most ±5°, nothing stretched), remove the outline, write the page filter into Info. It is uploaded in place of the old file (`If-Match` the md5 this device knows; 412 says to sync first), kept as this device's copy (`evoEdited` in `db.files`, used until a sync brings the same md5), the annotations moved with their pages (by the middle of their first rect; turned with the page; split pages relabelled 1…n), and the reader opens again once a sync has the new md5 (90 s at most). Extracted pages become a new standalone PDF in the chosen collection, opened if asked. Only stored (not linked) PDFs in writable libraries with Zotero storage; not for PDFs in the vault | `src/ui/reader/pdf-edit.ts`; `src/utils/evo-pdf-rewrite.ts`, `src/utils/evo-pdf-geometry.ts` (tests in `tests/unit/evo-pdf-rewrite.test.ts`); `uploadFileBytes()`, `createStandaloneAttachment()` in `attach-file.ts`; `putEditedFile()` in `worker/services/attachment.ts`; `remapAnnotations()` in `worker/services/evo-library.ts`; `evoListCollections` in `bridge.ts`; `evoReload()` in `view.ts`. Dependency: `pdf-lib` 1.17.1 | Requested. OCR is not in it (see below). |
 
-Known limits and open checks of these (as of 1.7.1-beta.9):
+Known limits and open checks of these (as of 1.7.1-beta.10):
+
+- PDF editing was checked on generated PDFs (rewrites read back with
+  pdf.js and pdf-lib, a straightened page measured level again) and its
+  upload against a stand-in for Zotero's API. Not run against Zotero's
+  servers: replacing a file, the annotation update reaching Zotero and a
+  second client, and the extracted PDF being opened after its sync.
+  Annotations whose rects span the cut are put on the half their middle is
+  in. Ink is moved, not cut. OCR is not done: Tesseract (the WebAssembly
+  engine and three languages' data) adds several megabytes to the plugin
+  or a download on first use, and what becomes of born-digital pages
+  ("the text layer is deleted") wants a decision first.
 
 - Automatic sync was written against Zotero's own streaming client and is
   covered by unit tests with a fake stream; it had not yet been run against
@@ -135,7 +151,8 @@ Known limits and open checks of these (as of 1.7.1-beta.9):
   kanban-evo has to say which card is being edited. Reading view has no
   cursor: there only the note itself (a source note) is followed. The
   strip tab loads the whole document for each item it shows (hidden); a
-  move to another item opens it anew. An EPUB has no strip.
+  move to another item opens it anew. An EPUB has no strip. (The item
+  pane kind of strip tab, beta.10, loads only the item.)
 
 ### Reader (`pad-mac/obsidian-zotero-reader-evo`)
 
@@ -160,6 +177,11 @@ only call into them; every such line is marked `ZotFlow Evo`.
 | Note strip, beta.7: a list whose comments are all folded away no longer says "No comments yet"; the head's title draws `<i>` in italics | `any` of the model in `Strip`; `titleRuns()` in `strip-layout.mjs` | Fixes. |
 
 | The strip alone (beta.9, the plugin's annotation strip tab): `stripOnly` in the strip settings puts `zf-evo-strip-only` on the reader's body, the PDF view's root and the strip's documents: no toolbar or sidebar, the pages (or the snapshot) hidden, the strip across the whole reader as a list, no resize handle, no page filter. The page number opens the place, as does Ctrl/Cmd+click on an entry (`noteStripOpen` to the plugin); headings too. A click under an entry still starts a note after it; a click with nothing above does nothing (the place being read is not in sight) | `applyNoteStrip()`, `reportNoteStripOpen()`, `STRIP_ONLY_CLASS` in `obsidian-evo.js`; `setStripOnly()` in `strip-host.js`, `_applyStripOnly()` in `strip-host-pdf.js`; `stripOnly` in `Strip`, `StripHead`, `Card` (`onOpen`), `EvoNoteStrip` in `note-strip.js`; `_evo.scss` | Requested. |
+
+| pdf.js patches (beta.10): `pdfjs/patches/*.patch` are applied to the pdf.js submodule by `pdfjs/build` before it builds (skipped when already applied), so CI builds them too. `0001-zf-evo-page-filter.patch`: the theme's `Blender` filters a page's pixels and colours through `window.zfEvoPageFilter` before it maps them to the theme | `pdfjs/patches/`, `pdfjs/build` | The page filter has to act before the theme, or a whitened scan stays grey-white instead of taking the theme's background. |
+| Page filter, beta.10 (replaces beta.7/8's SVG filter): KOReader's order and units — saturation, then contrast as a gamma (0.8–50, `v' = 255·(v/255)^g`), then every pixel at or above the white threshold (16–255, 255 off) becomes white, as k2pdfopt's `bmp_adjust_contrast` then `bmp_paint_white`. Logarithmic sliders; the panel stays open until closed (Reset, Close). With no theme an identity theme is set so the Blender runs. Kept per PDF by the plugin; one in the PDF's Info (`ZotFlowEvoPageFilter`) is used when the plugin has none | `src/evo/page-filter.mjs` (tests in `test/evo/page-filter.test.mjs`); `applyPdfFilter()`, `adoptPdfInfoFilter()` in `obsidian-evo.js`; `FilterPanel` in `note-strip.js` | Requested ("like KOReader, bigger ranges", "take the Obsidian theme background", "store it per PDF"). |
+| Beta.10 reader details: the PDF's scrollbar shows only while the pointer is over it (fade in 90 ms, out 140 ms); the strip's own scrollbar is hidden; a page number (label, page / pages) at the strip's top left outside it, while the pointer is over the strip (with the strip hidden the plugin shows it in the tab bar, `pageInfo` event); a fold-all button for the outline headings in the strip (a different, two-chevron icon); the next-annotation arrows take clicks and sit 40 px from the strip's top and bottom | `src/evo/scrollbar-hover.js`; `setPageInfo()`, arrow styles in `strip-host-pdf.js`; `IconFoldAll`, `foldAll` in `note-strip.js`; `reportPageInfo()` in `obsidian-evo.js`; `_evo.scss` | Requested. |
+| PDF editing menu (beta.10, Zotero PDFs only, not in the strip tab or for PDFs in the vault): option chips, then Cancel and Process. Split: a red line across the pages, dragged; Shift+drag moves one page's line alone (blue), Shift+double-click puts it back. Straighten: each page's tilt measured here (projection profiles as Leptonica's `pixFindSkew`: Otsu threshold, sweep ±5° in 0.25°, then 0.02°; guards: at least 1500 ink points, the best angle not at the edge of the sweep, best/worst score ≥ 4, under 0.1° left alone). Remove outline. Extract: a page range (labels or page numbers), Shift+click for a range, Ctrl/Cmd+click to add or drop a page (green outline), a searchable collection list, "open the new PDF". The request goes to the plugin (`pdfEditRequest`), which rewrites and uploads | `src/evo/pdf-edit-panel.js`, `src/evo/pdf-edit-overlay.js`, `src/evo/deskew.mjs` and `src/evo/page-range.mjs` (tests in `test/evo/`); `IconPdfEdit` in `note-strip.js`; parent API `evoListCollections` | Requested. OCR left out (see the plugin's limits). |
 
 Known limits of these: with the toolbar hidden, Tab still cycles through
 the hidden toolbar's focus groups (`focus-manager.js` is untouched), and the
@@ -242,6 +264,13 @@ left out or opens a reader instead. Its scroll position is not kept as the
 attachment's reading position, and it does not count as the attachment's
 reader (a reader of the same file can be open beside it; edits in either
 reach the other).
+
+Since beta.10 the tab can instead be the library's item pane
+(`EvoStripPaneView`, setting "Annotation strip tab", the default): the
+item's files, abstract and annotations with the colour filter, read from
+the database only, so it follows at once. No editing there; a click on an
+annotation opens it in a reader. The state saved with the layout is the
+item shown.
 
 ### How the note strip works
 

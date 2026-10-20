@@ -98,6 +98,7 @@ import {
     obtainFile,
     saveAsNewItem,
     uploadAttachment,
+    uploadFileBytes,
 } from "ui/evo-library/attach-file";
 import { publishScope } from "ui/evo-library/selection";
 
@@ -406,5 +407,52 @@ describe("a new item from the ISBN on the page", () => {
         };
         await saveAsNewItem(webview);
         expect(state.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    });
+});
+
+describe("replacing a stored file (PDF editing)", () => {
+    it("asks with If-Match the md5 this device knows; returns the new md5", async () => {
+        let fileCalls = 0;
+        state.routes = [
+            {
+                match: /^POST .*\/users\/7\/items\/ATT00001\/file$/,
+                get status() {
+                    return fileCalls++ === 0 ? 200 : 204;
+                },
+                json: {
+                    url: "https://s3.example/up",
+                    contentType: "multipart/form-data; boundary=X",
+                    prefix: "P",
+                    suffix: "S",
+                    uploadKey: "UPK",
+                },
+            },
+            { match: /^POST https:\/\/s3\.example\/up$/, status: 201 },
+        ];
+        const bytes = new TextEncoder().encode("%PDF-1.7\nedited");
+        const md5New = await uploadFileBytes(
+            { libraryID: 7, key: "ATT00001" },
+            bytes,
+            "x.pdf",
+            md5,
+        );
+        expect(md5New).toBe(SparkMD5.ArrayBuffer.hash(bytes.buffer));
+        const [auth] = state.calls;
+        expect(auth!.headers?.["If-Match"]).toBe(md5);
+        expect(auth!.headers?.["If-None-Match"]).toBeUndefined();
+        expect(state.calls).toHaveLength(3);
+    });
+
+    it("the file changed in Zotero meanwhile (412): says to sync first", async () => {
+        state.routes = [{ match: /\/file$/, status: 412 }];
+        await expect(
+            uploadFileBytes(
+                { libraryID: 7, key: "ATT00001" },
+                new Uint8Array([1]),
+                "x.pdf",
+                md5,
+            ),
+        ).rejects.toThrow(/sync/);
+        expect(state.calls).toHaveLength(1);
     });
 });

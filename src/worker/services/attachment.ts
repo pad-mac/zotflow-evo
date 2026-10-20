@@ -105,6 +105,43 @@ export class AttachmentService {
     }
 
     /**
+     * ZotFlow Evo: keep bytes this device rewrote and uploaded (PDF
+     * editing), so the reader opens them once the item's md5 (after the
+     * next sync) is theirs — even when files are read from Zotero's own
+     * storage folder, which Zotero brings up to date only with its own sync.
+     */
+    async putEditedFile(
+        libraryID: number,
+        key: string,
+        buffer: ArrayBuffer,
+        md5: string,
+        fileName: string,
+        mimeType = "application/pdf",
+    ): Promise<void> {
+        await db.files.put({
+            libraryID,
+            key,
+            buffer,
+            md5,
+            fileName,
+            mimeType,
+            size: buffer.byteLength,
+            lastAccessedAt: new Date().toISOString(),
+            evoEdited: true,
+        });
+    }
+
+    /** ZotFlow Evo: the rewritten copy of an item, if it is the item's current file. */
+    private async editedCopy(
+        item: IDBZoteroItem<AttachmentData>,
+    ): Promise<IDBZoteroFile | undefined> {
+        const md5 = item.raw.data.md5;
+        if (!md5) return undefined;
+        const cached = await db.files.get([item.libraryID, item.key]);
+        return cached?.evoEdited && cached.md5 === md5 ? cached : undefined;
+    }
+
+    /**
      * Identify the concrete bytes a new Reader would load. Mutable disk files
      * use filesystem metadata; if it cannot be read, callers must not reuse an
      * existing Blob merely because the Zotero item version stayed unchanged.
@@ -123,6 +160,9 @@ export class AttachmentService {
                 `Item metadata not found for ${attachmentItem.key}`,
             );
         }
+
+        // ZotFlow Evo: a rewritten copy kept here is the file (see putEditedFile()).
+        if (await this.editedCopy(item)) return { kind: "library" };
 
         let filePath: string | null;
         try {
@@ -202,6 +242,12 @@ export class AttachmentService {
         );
 
         const linkMode = item.raw.data.linkMode;
+        // ZotFlow Evo: a rewritten copy kept here comes before Zotero's
+        // storage folder, which may still hold the old file.
+        const edited = await this.editedCopy(item);
+        if (edited) {
+            return new Blob([edited.buffer], { type: edited.mimeType });
+        }
         if (
             this.settings.useZoteroStorage &&
             (linkMode === "imported_file" || linkMode === "imported_url") &&

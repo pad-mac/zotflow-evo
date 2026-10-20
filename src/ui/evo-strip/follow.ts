@@ -13,6 +13,10 @@ import { EditorView } from "@codemirror/view";
 import { MarkdownView, TFile, editorInfoField } from "obsidian";
 
 import { services } from "services/services";
+import {
+    EVO_STRIP_PANE_VIEW_TYPE,
+    EvoStripPaneView,
+} from "ui/evo-strip/pane-view";
 import { EVO_STRIP_VIEW_TYPE, EvoStripView } from "ui/evo-strip/strip-view";
 import { linkPathsOnLine } from "utils/evo-line-links";
 
@@ -51,11 +55,28 @@ export function subjectOfLine(
     return subjectOfNote(app, own instanceof TFile ? own : null);
 }
 
-function stripViews(app: App): EvoStripView[] {
-    return app.workspace
-        .getLeavesOfType(EVO_STRIP_VIEW_TYPE)
+/** The two kinds of strip tab: the reader's strip, or the item pane. */
+type StripTab = EvoStripView | EvoStripPaneView;
+const STRIP_TYPES = [EVO_STRIP_VIEW_TYPE, EVO_STRIP_PANE_VIEW_TYPE];
+
+function stripLeaves(app: App) {
+    return STRIP_TYPES.flatMap((type) => app.workspace.getLeavesOfType(type));
+}
+
+function stripViews(app: App): StripTab[] {
+    return stripLeaves(app)
         .map((leaf) => leaf.view)
-        .filter((v): v is EvoStripView => v instanceof EvoStripView);
+        .filter(
+            (v): v is StripTab =>
+                v instanceof EvoStripView || v instanceof EvoStripPaneView,
+        );
+}
+
+/** The strip tab's view type the settings ask for. */
+function stripType(): string {
+    return services.settings.evoStripTabMode === "item-pane"
+        ? EVO_STRIP_PANE_VIEW_TYPE
+        : EVO_STRIP_VIEW_TYPE;
 }
 
 export function registerStripFollow(plugin: Plugin) {
@@ -106,8 +127,7 @@ export function registerStripFollow(plugin: Plugin) {
             // An editor inside a frame: the note strip's own comment editors.
             if (view.dom.ownerDocument.defaultView?.frameElement) return;
             // Cheap first: nothing to follow for.
-            if (!app.workspace.getLeavesOfType(EVO_STRIP_VIEW_TYPE).length)
-                return;
+            if (!stripLeaves(app).length) return;
             const file = update.state.field(editorInfoField, false)?.file;
             if (!file) return;
             const state = update.state;
@@ -121,8 +141,7 @@ export function registerStripFollow(plugin: Plugin) {
         app.workspace.on("active-leaf-change", (leaf) => {
             const view = leaf?.view;
             if (!(view instanceof MarkdownView) || !view.file) return;
-            if (!app.workspace.getLeavesOfType(EVO_STRIP_VIEW_TYPE).length)
-                return;
+            if (!stripLeaves(app).length) return;
             const editor = view.editor;
             const line =
                 view.getMode() === "source"
@@ -133,17 +152,22 @@ export function registerStripFollow(plugin: Plugin) {
     );
 }
 
-/** Open an annotation strip tab beside the active pane (or show the one open). */
+/**
+ * Open an annotation strip tab beside the active pane (or show the one
+ * open; one of the other kind is turned into the kind the settings ask for).
+ */
 export async function openStripTab(app: App): Promise<void> {
-    const existing = app.workspace.getLeavesOfType(EVO_STRIP_VIEW_TYPE)[0];
+    const type = stripType();
+    const existing = stripLeaves(app)[0];
     if (existing) {
+        await applyStripTabMode(app);
         await app.workspace.revealLeaf(existing);
         return;
     }
     // The note being written, before the split takes the focus.
     const md = app.workspace.getActiveViewOfType(MarkdownView);
     const leaf = app.workspace.getLeaf("split", "vertical");
-    await leaf.setViewState({ type: EVO_STRIP_VIEW_TYPE, active: false });
+    await leaf.setViewState({ type, active: false });
     await app.workspace.revealLeaf(leaf);
     if (md) app.workspace.setActiveLeaf(md.leaf, { focus: true });
     // Show at once what that note's line points at.
@@ -153,14 +177,38 @@ export async function openStripTab(app: App): Promise<void> {
                 ? md.editor.getLine(md.editor.getCursor().line)
                 : "";
         const subject = subjectOfLine(app, line, md.file.path);
-        if (subject && leaf.view instanceof EvoStripView)
-            await leaf.view.follow(subject);
+        const view = leaf.view;
+        if (
+            subject &&
+            (view instanceof EvoStripView || view instanceof EvoStripPaneView)
+        )
+            await view.follow(subject);
+    }
+}
+
+/** Strip tabs open now are turned into the kind the settings ask for (the setting changed). */
+export async function applyStripTabMode(app: App): Promise<void> {
+    const type = stripType();
+    for (const leaf of stripLeaves(app)) {
+        if (leaf.view.getViewType() === type) continue;
+        const shown = (leaf.view as StripTab).shown;
+        await leaf.setViewState({ type, active: false });
+        const view = leaf.view;
+        if (
+            shown &&
+            (view instanceof EvoStripView || view instanceof EvoStripPaneView)
+        )
+            await view.follow(shown);
     }
 }
 
 /** The annotation strip tab: its view, its command, and the following. */
 export function registerEvoStrip(plugin: Plugin) {
     plugin.registerView(EVO_STRIP_VIEW_TYPE, (leaf) => new EvoStripView(leaf));
+    plugin.registerView(
+        EVO_STRIP_PANE_VIEW_TYPE,
+        (leaf) => new EvoStripPaneView(leaf),
+    );
     plugin.addCommand({
         id: "open-annotation-strip",
         name: "Open annotation strip (follows the line being written)",

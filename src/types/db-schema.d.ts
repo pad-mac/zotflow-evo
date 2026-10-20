@@ -138,6 +138,12 @@ export interface IDBZoteroFile {
     md5: string; // File MD5 (API returned), used to determine if re-download is needed
     lastAccessedAt: string;
     size: number;
+    /**
+     * ZotFlow Evo: bytes this device rewrote (PDF editing) and uploaded.
+     * Preferred over Zotero's own storage folder while that still holds the
+     * old file (see AttachmentService.editedCopy()).
+     */
+    evoEdited?: boolean;
 }
 
 /* ------------------------------------------------------------------ */

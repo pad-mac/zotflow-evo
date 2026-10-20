@@ -257,6 +257,7 @@ export const DEFAULT_COLLECTION_COLUMNS: ColumnId[] = [
     "creator",
     "year",
     "attachment",
+    "annotations",
 ];
 
 export function columnDef(id: ColumnId): ColumnDef {
@@ -728,7 +729,7 @@ export function groupAnnotations(
 
 /** The colours in use, in the reader's order (others after). */
 export function annotationColors(
-    annotations: readonly EvoCollectionAnnotation[],
+    annotations: readonly { color?: string | null }[],
 ): string[] {
     const used = new Set(
         annotations.map((a) => (a.color ?? "").toLowerCase()).filter(Boolean),

@@ -4802,3 +4802,95 @@ body.zotflow-evo-col-resizing * {
 .zotflow-evo-coll.is-trashed .zotflow-evo-coll-name {
     color: var(--text-muted);
 }
+
+/* ----- Reader: the page being read, in the view's header ----- */
+
+.zotflow-evo-header-page {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    margin-inline-end: 6px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    white-space: nowrap;
+}
+
+.zotflow-evo-header-page:empty {
+    display: none;
+}
+
+.zotflow-evo-header-page-label {
+    color: var(--text-normal);
+}
+
+/* ----- The colour filter above the item pane's annotations ----- */
+
+.zotflow-evo-details-annohead {
+    position: sticky;
+    top: -12px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: -12px -8px 8px -4px;
+    padding: 8px 16px 6px 12px;
+    background: var(--background-primary);
+}
+
+.zotflow-evo-details-annocount {
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ----- The item pane in a collection tab: beside the table, under it when narrow ----- */
+
+/* The tab is the container: a container query cannot style the container itself. */
+.zotflow-evo-colltab {
+    container-type: inline-size;
+}
+
+.zotflow-evo-colltab-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.zotflow-evo-colltab-items {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.zotflow-evo-colltab-body > .zotflow-evo-pane.is-details {
+    flex: 0 0 45%;
+    min-height: 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+@container (min-width: 620px) {
+    .zotflow-evo-colltab-body.has-details {
+        flex-direction: row;
+    }
+
+    .zotflow-evo-colltab-body > .zotflow-evo-pane.is-details {
+        flex: 0 0 clamp(240px, 38%, 380px);
+        border-top: none;
+        border-inline-start: 1px solid var(--background-modifier-border);
+    }
+}
+
+/* ----- The annotation strip tab as the item pane ----- */
+
+.zotflow-evo-strip-pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}

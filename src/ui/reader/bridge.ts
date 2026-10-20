@@ -445,6 +445,32 @@ export class IframeReaderBridge {
                 return editor;
             },
 
+            evoListCollections: async () => {
+                const libraryID = this.attachmentItem?.libraryID;
+                if (libraryID === undefined) return [];
+                const tree = await workerBridge.evoLibrary.getCollectionTree();
+                const library = tree.find((l) => l.libraryID === libraryID);
+                const out: { key: string; path: string }[] = [];
+                const walk = (
+                    nodes: {
+                        key: string;
+                        name: string;
+                        children: typeof nodes;
+                    }[],
+                    prefix: string,
+                ) => {
+                    for (const node of nodes) {
+                        const path = prefix
+                            ? `${prefix} / ${node.name}`
+                            : node.name;
+                        out.push({ key: node.key, path });
+                        walk(node.children, path);
+                    }
+                };
+                walk(library?.collections ?? [], "");
+                return out;
+            },
+
             renderMarkdownToContainer: (
                 container: HTMLElement,
                 text: string,
