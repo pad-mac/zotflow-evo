@@ -231,6 +231,7 @@ function noteStripSettings(): ReaderNoteStrip {
             quotes: settings.readerNoteStripQuotes,
             highlightOpacity: settings.readerNoteStripHighlightOpacity,
             spacing: settings.readerNoteStripSpacing,
+            toolToggle: settings.readerSelectionToolToggle,
         },
     };
 }

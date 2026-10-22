@@ -80,6 +80,8 @@ export interface ReaderNoteStrip {
         highlightOpacity?: number;
         /** Room between entries in pixels (12 as before). */
         spacing?: number;
+        /** The highlight / underline switch in the colour bubble over a selection (hidden unless set). */
+        toolToggle?: boolean;
     };
     /**
      * The Obsidian view's header buttons, shown in the strip's head while

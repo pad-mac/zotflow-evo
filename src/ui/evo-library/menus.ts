@@ -14,6 +14,11 @@ import {
 } from "ui/evo-library/actions";
 
 import {
+    canRevealFiles,
+    revealFileTitle,
+    revealItemFile,
+} from "ui/evo-library/reveal-file";
+import {
     ANNOTATIONS_ICON,
     ANNOTATIONS_ICON_FALLBACK,
     iconOr,
@@ -51,6 +56,14 @@ export function showItemMenu(
                 .setTitle("Open")
                 .setIcon("book-open")
                 .onClick(() => openItem(app, row.libraryID, row.key)),
+        );
+    }
+    if ((row.attachment || row.itemType === "attachment") && canRevealFiles()) {
+        menu.addItem((item) =>
+            item
+                .setTitle(revealFileTitle())
+                .setIcon("folder-open")
+                .onClick(() => void revealItemFile(row.libraryID, row.key)),
         );
     }
     if (regular) {

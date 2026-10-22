@@ -36,7 +36,8 @@ type StripToggleKey =
     | "readerNoteStripVisible"
     | "readerNoteStripList"
     | "readerNoteStripHighlights"
-    | "readerNoteStripQuotes";
+    | "readerNoteStripQuotes"
+    | "readerSelectionToolToggle";
 
 /** The two per-colour tables of text around a drop. */
 type DropTableKey = "evoHighlightDrop" | "evoCommentDrop";
@@ -329,6 +330,21 @@ export class EvoSection {
                                 4,
                                 40,
                                 1,
+                            ),
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Reader popups",
+                items: [
+                    {
+                        name: "Highlight / underline switch",
+                        desc: "The switch between highlighting and underlining in the colour bubble over selected text, as in Zotero. Off, the bubble has the colours only (a selection is highlighted; underline from the toolbar).",
+                        render: (setting) =>
+                            this.readerToggle(
+                                setting,
+                                "readerSelectionToolToggle",
                             ),
                     },
                 ],

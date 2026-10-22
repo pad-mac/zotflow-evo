@@ -33,12 +33,21 @@ import {
     useLibraryChanges,
 } from "ui/evo-library/parts";
 import { AbstractEditor, ItemEditor } from "ui/evo-library/ItemEditor";
+import {
+    canRevealFiles,
+    revealFileTitle,
+    revealItemFile,
+} from "ui/evo-library/reveal-file";
 import { openPersonNote } from "ui/evo-person";
+import { itemOutline } from "ui/evo-library/item-outline";
 import { annotationColors } from "utils/evo-library-model";
+import { interleaveOutline, placementOf } from "utils/evo-outline-list";
 import { notifyLinkedFile, openAttachment } from "utils/viewer";
 
 import type { App, WorkspaceLeaf } from "obsidian";
 import type { CardAnnotation } from "ui/evo-library/parts";
+import type { ItemOutline } from "ui/evo-library/item-outline";
+import type { OutlineListEntry } from "utils/evo-outline-list";
 import type {
     EvoAttachmentInfo,
     EvoItemDetails,
@@ -76,6 +85,14 @@ function showAttachmentMenu(
     menu.addItem((item) =>
         item.setTitle("Open").setIcon("book-open").onClick(open),
     );
+    if (canRevealFiles() && attachment.kind !== "link") {
+        menu.addItem((item) =>
+            item
+                .setTitle(revealFileTitle())
+                .setIcon("folder-open")
+                .onClick(() => void revealItemFile(libraryID, attachment.key)),
+        );
+    }
     if (attachment.kind === "pdf" || attachment.kind === "epub") {
         menu.addItem((item) =>
             item
@@ -123,6 +140,59 @@ function PersonLink({ app, name }: { app: App; name: string }) {
     );
 }
 
+/** Every item pane follows the outline button (it is one setting). */
+const outlineListeners = new Set<(on: boolean) => void>();
+
+function useOutlineShown(): [boolean, () => void] {
+    const [on, setOn] = useState(
+        () => services.settings.evoItemPaneOutline === true,
+    );
+    useEffect(() => {
+        outlineListeners.add(setOn);
+        return () => {
+            outlineListeners.delete(setOn);
+        };
+    }, []);
+    const toggle = useCallback(() => {
+        const next = services.settings.evoItemPaneOutline !== true;
+        services.settings.evoItemPaneOutline = next;
+        for (const listener of outlineListeners) listener(next);
+        void services
+            .saveSettings()
+            .catch((e: unknown) =>
+                services.logService.error(
+                    "Failed to save the item pane settings",
+                    "EvoLibrary",
+                    e,
+                ),
+            );
+    }, []);
+    return [on, toggle];
+}
+
+/** The outline of the PDF whose annotations are shown, while the button is on. */
+function useItemOutline(
+    on: boolean,
+    libraryID: number | undefined,
+    pdf: EvoAttachmentInfo | null,
+): ItemOutline | null {
+    const [outline, setOutline] = useState<ItemOutline | null>(null);
+    const key = pdf?.key;
+    const md5 = pdf?.md5;
+    useEffect(() => {
+        setOutline(null);
+        if (!on || libraryID === undefined || !key) return;
+        let live = true;
+        void itemOutline(libraryID, key, md5).then((o) => {
+            if (live) setOutline(o);
+        });
+        return () => {
+            live = false;
+        };
+    }, [on, libraryID, key, md5]);
+    return outline;
+}
+
 export function ItemDetails({
     app,
     leaf,
@@ -136,7 +206,15 @@ export function ItemDetails({
     const filter = useColorFilter();
     // Editing stays on while the selection moves, until the button again.
     const [editing, setEditing] = useState(false);
+    const [outlineOn, toggleOutline] = useOutlineShown();
     const annotations = details?.annotations;
+    // The outline is that of the one PDF the annotations are of.
+    const outlinePdf = useMemo(() => {
+        if (!details?.primaryKey) return null;
+        const a = details.attachments.find((x) => x.key === details.primaryKey);
+        return a?.kind === "pdf" ? a : null;
+    }, [details]);
+    const outline = useItemOutline(outlineOn, details?.libraryID, outlinePdf);
     const palette = useMemo(
         () => annotationColors(annotations ?? []),
         [annotations],
@@ -173,6 +251,18 @@ export function ItemDetails({
         color: a.color,
         pageLabel: a.pageLabel,
     }));
+    const placements = new Map(
+        details.annotations.map((a) => [a.id, placementOf(a.position)]),
+    );
+    const entries: OutlineListEntry<CardAnnotation>[] =
+        outlineOn && outline?.state === "ok"
+            ? interleaveOutline(
+                  cards,
+                  outline.headings,
+                  (c) => placements.get(c.id) ?? null,
+              )
+            : cards.map((annotation) => ({ kind: "annotation", annotation }));
+    const linked = details.attachments.filter((a) => a.kind === "linked");
     const open = (a: EvoAttachmentInfo) => {
         if (a.kind === "linked") {
             notifyLinkedFile();
@@ -286,6 +376,18 @@ export function ItemDetails({
                         )}
                     </div>
                 )}
+                {linked.length > 0 && (
+                    <div className="zotflow-evo-details-warning">
+                        <Icon name="alert-triangle" />
+                        <span>
+                            {linked.length === details.attachments.length
+                                ? "A linked file: "
+                                : `Linked file${linked.length > 1 ? "s" : ""} (${linked.map((a) => a.title).join(", ")}): `}
+                            stored outside Zotero&rsquo;s storage, so ZotFlow
+                            can&rsquo;t open it yet. Open it in Zotero.
+                        </span>
+                    </div>
+                )}
             </div>
             {editing ? (
                 <div className="zotflow-evo-details-abstract is-editing">
@@ -325,6 +427,31 @@ export function ItemDetails({
                         <Icon name="pencil" />
                     </span>
                 )}
+                {outlinePdf && details.annotations.length > 0 && (
+                    <span
+                        className={
+                            "zotflow-evo-tool zotflow-evo-details-outline-toggle" +
+                            (outlineOn ? " is-on" : "")
+                        }
+                        role="button"
+                        tabIndex={0}
+                        title={
+                            outlineOn
+                                ? "Hide the PDF's outline among the annotations"
+                                : "Show the PDF's outline among the annotations"
+                        }
+                        aria-pressed={outlineOn}
+                        onClick={toggleOutline}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                toggleOutline();
+                            }
+                        }}
+                    >
+                        <Icon name="list-tree" fallback="list" />
+                    </span>
+                )}
             </div>
             {editing && details.itemType !== "note" && (
                 <div className="zotflow-evo-details-editor">
@@ -351,20 +478,49 @@ export function ItemDetails({
                             />
                         </div>
                     )}
-                    {cards.map((card) => (
-                        <AnnotationCard
-                            key={card.id}
-                            annotation={card}
-                            onOpen={(c) =>
-                                openAnnotation(
-                                    app,
-                                    c.libraryID,
-                                    c.attachmentKey,
-                                    c.id,
-                                )
-                            }
-                        />
-                    ))}
+                    {outlineOn && outlinePdf && outline && outline.state !== "ok" && (
+                        <div className="zotflow-evo-details-outline-note">
+                            {outline.state === "none"
+                                ? "This PDF has no outline."
+                                : "The outline shows once the PDF is on this device (opened once, or in Zotero's storage folder)."}
+                        </div>
+                    )}
+                    {entries.map((entry, i) =>
+                        entry.kind === "heading" ? (
+                            <div
+                                key={`h${i}`}
+                                className="zotflow-evo-details-heading"
+                                data-level={Math.min(entry.heading.level, 4)}
+                                title={`Open at this page (${entry.heading.page + 1})`}
+                                onClick={() => {
+                                    if (!outlinePdf) return;
+                                    void openAttachment(
+                                        details.libraryID,
+                                        outlinePdf.key,
+                                        app,
+                                        JSON.stringify({
+                                            pageIndex: entry.heading.page,
+                                        }),
+                                    );
+                                }}
+                            >
+                                {entry.heading.title}
+                            </div>
+                        ) : (
+                            <AnnotationCard
+                                key={entry.annotation.id}
+                                annotation={entry.annotation}
+                                onOpen={(c) =>
+                                    openAnnotation(
+                                        app,
+                                        c.libraryID,
+                                        c.attachmentKey,
+                                        c.id,
+                                    )
+                                }
+                            />
+                        ),
+                    )}
                 </div>
             )}
         </div>

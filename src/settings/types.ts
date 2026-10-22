@@ -184,6 +184,10 @@ export interface ZotFlowSettings {
     readerNoteStripHighlightOpacity: number;
     /** ZotFlow Evo: room between the entries of the note strip, in pixels. */
     readerNoteStripSpacing: number;
+    /** ZotFlow Evo: the highlight / underline switch in the reader's colour bubble (hidden by default). */
+    readerSelectionToolToggle: boolean;
+    /** ZotFlow Evo: the item pane shows the PDF's outline among its annotations. */
+    evoItemPaneOutline: boolean;
     /** ZotFlow Evo: the languages OCR reads (Tesseract codes), as last chosen in the PDF editing menu. */
     evoOcrLanguages: string[];
     /** CSL renderer: default style id (slug or custom style key). */
@@ -333,6 +337,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     readerNoteStripQuotes: false,
     readerNoteStripHighlightOpacity: 1,
     readerNoteStripSpacing: 12,
+    readerSelectionToolToggle: false,
+    evoItemPaneOutline: false,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

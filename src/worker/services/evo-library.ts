@@ -81,6 +81,8 @@ export interface EvoAttachmentInfo {
     key: string;
     title: string;
     kind: AttachmentKind;
+    /** The file's md5 as Zotero has it (none before its first upload). */
+    md5?: string;
 }
 
 /** What the details pane shows of an item. */
@@ -974,6 +976,9 @@ export class EvoLibraryService {
                 key: a.key,
                 title: a.title || field(a, "title") || "Attachment",
                 kind: this.kindOf(a),
+                md5:
+                    (a.raw?.data as { md5?: string } | undefined)?.md5 ||
+                    undefined,
             })),
             primaryKey: primary?.key ?? null,
             annotations,

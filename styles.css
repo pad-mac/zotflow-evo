@@ -4826,6 +4826,28 @@ body.zotflow-evo-col-resizing * {
     color: var(--text-normal);
 }
 
+/* Minimal's focus mode folds the view header away and fades its title and
+   buttons (until hovered): the page number goes with them. */
+body.minimal-focus-mode .mod-root .view-header .zotflow-evo-header-page {
+    opacity: 0;
+    transition: opacity var(--focus-animation-duration, 0.1s) linear 0.5s;
+}
+
+body.minimal-focus-mode
+    .mod-root
+    .workspace-tab-header-container:hover
+    ~ .workspace-tab-container
+    .view-header
+    .zotflow-evo-header-page,
+body.minimal-focus-mode .mod-root .view-header:hover .zotflow-evo-header-page,
+body.minimal-focus-mode
+    .mod-root
+    .view-header:focus-within
+    .zotflow-evo-header-page {
+    opacity: 1;
+    transition: opacity var(--focus-animation-duration, 0.1s) linear 0.1s;
+}
+
 /* ----- The colour filter above the item pane's annotations ----- */
 
 .zotflow-evo-details-annohead {
@@ -4946,20 +4968,93 @@ body.zotflow-evo-col-resizing * {
     display: flex;
     flex: none;
     justify-content: flex-end;
+    gap: 4px;
     min-height: 26px;
     padding: 0 10px;
 }
 
-.zotflow-evo-details-edit {
+.zotflow-evo-details-edit,
+.zotflow-evo-details-outline-toggle {
     opacity: 0;
     transition: opacity 140ms ease-out;
 }
 
 .zotflow-evo-details:hover .zotflow-evo-details-edit,
 .zotflow-evo-details-edit:focus-visible,
-.zotflow-evo-details-edit.is-on {
+.zotflow-evo-details-edit.is-on,
+.zotflow-evo-details:hover .zotflow-evo-details-outline-toggle,
+.zotflow-evo-details-outline-toggle:focus-visible,
+.zotflow-evo-details-outline-toggle.is-on {
     opacity: 1;
     transition-duration: 90ms;
+}
+
+/* ----- A linked file: said in the pane (beta.13) ----- */
+
+.zotflow-evo-details-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 6px;
+    color: var(--text-warning);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
+.zotflow-evo-details-warning svg {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-top: 1px;
+}
+
+/* ----- The PDF's outline among the annotations (beta.13) ----- */
+
+.zotflow-evo-details-heading {
+    margin: 14px 8px 8px 0;
+    padding-inline-start: calc(var(--zf-level, 0) * 12px);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.zotflow-evo-details-heading[data-level="0"] {
+    --zf-level: 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-evo-details-heading[data-level="1"] {
+    --zf-level: 1;
+}
+
+.zotflow-evo-details-heading[data-level="2"] {
+    --zf-level: 2;
+}
+
+.zotflow-evo-details-heading[data-level="3"] {
+    --zf-level: 3;
+}
+
+.zotflow-evo-details-heading[data-level="4"] {
+    --zf-level: 4;
+}
+
+.zotflow-evo-details-heading:first-child,
+.zotflow-evo-details-annohead + .zotflow-evo-details-heading {
+    margin-top: 0;
+}
+
+.zotflow-evo-details-heading:hover {
+    color: var(--interactive-accent);
+}
+
+.zotflow-evo-details-outline-note {
+    margin: 0 8px 12px 0;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
 }
 
 .zotflow-evo-details-editor {

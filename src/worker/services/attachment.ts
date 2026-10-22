@@ -131,6 +131,37 @@ export class AttachmentService {
         });
     }
 
+    /**
+     * ZotFlow Evo: an attachment's bytes if they are on this device without
+     * a download — a rewritten copy, Zotero's storage folder (when it is
+     * read), a linked file (desktop), or the cache with the current md5 —
+     * else null. For reading something out of a file in passing (the
+     * outline in the item pane), where a download per selection would cost
+     * too much.
+     */
+    async localFile(libraryID: number, key: string): Promise<ArrayBuffer | null> {
+        const item = (await db.items.get([libraryID, key])) as
+            | IDBZoteroItem<AttachmentData>
+            | undefined;
+        if (!item || item.itemType !== "attachment") return null;
+        const linkMode = item.raw.data.linkMode;
+        const edited = await this.editedCopy(item);
+        if (edited) return edited.buffer;
+        try {
+            const external = await this.resolveReaderExternalFilePath(item);
+            if (external) {
+                return await this.parentHost.readExternalBinaryFile(external);
+            }
+        } catch {
+            // Not on disk here (or no path set up): try the cache.
+        }
+        if (linkMode === "linked_file") return null;
+        const cached = await db.files.get([libraryID, key]);
+        if (!cached) return null;
+        const md5 = item.raw.data.md5;
+        return !md5 || cached.md5 === md5 ? cached.buffer : null;
+    }
+
     /** ZotFlow Evo: the rewritten copy of an item, if it is the item's current file. */
     private async editedCopy(
         item: IDBZoteroItem<AttachmentData>,

@@ -69,10 +69,21 @@ async function stripAttachment(
             attachments,
             kindOf,
         );
-        attachment = primary ?? choices[0] ?? null;
+        attachment =
+            primary ??
+            choices[0] ??
+            // Only a linked file: say so (below), not "No file".
+            attachments.find((a) => kindOf(a) === "linked") ??
+            null;
     }
     if (!attachment) return { attachment: null, why: "No file.", title };
     const kind = kindOf(attachment);
+    if (kind === "linked")
+        return {
+            attachment: null,
+            why: "A linked file, stored outside Zotero's storage: ZotFlow can't open it yet. Open it in Zotero.",
+            title,
+        };
     if (kind !== "pdf" && kind !== "snapshot")
         return {
             attachment: null,
