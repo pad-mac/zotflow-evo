@@ -35,7 +35,8 @@ import type { EvoDropAffixes, SettingKey } from "settings/types";
 type StripToggleKey =
     | "readerNoteStripVisible"
     | "readerNoteStripList"
-    | "readerNoteStripHighlights";
+    | "readerNoteStripHighlights"
+    | "readerNoteStripQuotes";
 
 /** The two per-colour tables of text around a drop. */
 type DropTableKey = "evoHighlightDrop" | "evoCommentDrop";
@@ -296,7 +297,117 @@ export class EvoSection {
                     },
                 ],
             },
+            {
+                type: "group",
+                heading: "Note strip appearance",
+                items: [
+                    {
+                        name: "Quotation marks round highlights",
+                        desc: "The text of a highlight in the strip between “ and ”, so it stands apart from the comments.",
+                        render: (setting) =>
+                            this.readerToggle(setting, "readerNoteStripQuotes"),
+                    },
+                    {
+                        name: "Highlight text strength",
+                        desc: "How strong the text of highlights is beside comments (1: the same). Lower makes it fainter.",
+                        render: (setting) =>
+                            this.readerSlider(
+                                setting,
+                                "readerNoteStripHighlightOpacity",
+                                0.3,
+                                1,
+                                0.05,
+                            ),
+                    },
+                    {
+                        name: "Space between entries",
+                        desc: "In pixels (12 as before). In the list, and between entries beside the page.",
+                        render: (setting) =>
+                            this.readerSlider(
+                                setting,
+                                "readerNoteStripSpacing",
+                                4,
+                                40,
+                                1,
+                            ),
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Authors",
+                items: [
+                    {
+                        name: "Folder for new author notes",
+                        desc: "A click on an author's name (item pane, note strip) opens their note; one that does not exist yet is made in this folder. Empty: where Obsidian puts new notes.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder("People")
+                                    .setValue(
+                                        this.plugin.settings.evoAuthorFolder,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoAuthorFolder =
+                                            value.trim();
+                                        await this.plugin.saveSettings();
+                                    });
+                            });
+                        },
+                    },
+                    {
+                        name: "Template for new author notes",
+                        desc: "The note a new author note starts from (path in the vault). {{title}} becomes the name, {{date}} and {{time}} (with a format, {{date:YYYY-MM-DD}}) as in Obsidian's Templates; Templater's syntax is left to Templater. Empty: an empty note.",
+                        render: (setting) => {
+                            setting.addText((text) => {
+                                text.setPlaceholder("Templates/Person.md")
+                                    .setValue(
+                                        this.plugin.settings.evoAuthorTemplate,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoAuthorTemplate =
+                                            value.trim();
+                                        await this.plugin.saveSettings();
+                                    });
+                                text.inputEl.addClass("zotflow-evo-wide-input");
+                            });
+                        },
+                    },
+                ],
+            },
         ];
+    }
+
+    /**
+     * The groups by heading, for the settings tab to place each where it
+     * belongs (the fork's settings sit among upstream's since beta.12).
+     */
+    groups(): Map<string, SettingDefinitionItem<SettingKey>> {
+        const map = new Map<string, SettingDefinitionItem<SettingKey>>();
+        for (const item of this.getDefinitions()) {
+            const heading = (item as { heading?: string }).heading;
+            if (heading) map.set(heading, item);
+        }
+        return map;
+    }
+
+    /** A slider whose change every open reader follows at once. */
+    private readerSlider(
+        setting: Setting,
+        key: "readerNoteStripHighlightOpacity" | "readerNoteStripSpacing",
+        min: number,
+        max: number,
+        step: number,
+    ) {
+        setting.addSlider((slider) => {
+            slider
+                .setLimits(min, max, step)
+                .setValue(this.plugin.settings[key])
+                .onChange(async (value) => {
+                    this.plugin.settings[key] = value;
+                    notifyReaderChromeChanged();
+                    await this.plugin.saveSettings();
+                });
+        });
     }
 
     /** A toggle whose change every open reader follows at once. */

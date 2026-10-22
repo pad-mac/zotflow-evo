@@ -174,6 +174,16 @@ export interface ZotFlowSettings {
      * strip (editable), or the library's item pane (read only, faster).
      */
     evoStripTabMode: "reader" | "item-pane";
+    /** ZotFlow Evo: where a new note for an author (clicked in the item pane or the strip) goes; empty: Obsidian's place for new notes. */
+    evoAuthorFolder: string;
+    /** ZotFlow Evo: the template file a new author note starts from; empty: none. */
+    evoAuthorTemplate: string;
+    /** ZotFlow Evo: quotation marks round the text of highlights in the note strip. */
+    readerNoteStripQuotes: boolean;
+    /** ZotFlow Evo: opacity of the text of highlights in the note strip (comments stay at 1). */
+    readerNoteStripHighlightOpacity: number;
+    /** ZotFlow Evo: room between the entries of the note strip, in pixels. */
+    readerNoteStripSpacing: number;
     /** ZotFlow Evo: the languages OCR reads (Tesseract codes), as last chosen in the PDF editing menu. */
     evoOcrLanguages: string[];
     /** CSL renderer: default style id (slug or custom style key). */
@@ -318,6 +328,11 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     readerPdfFilters: {},
     evoStripTabMode: "item-pane",
     evoOcrLanguages: ["deu", "eng"],
+    evoAuthorFolder: "",
+    evoAuthorTemplate: "",
+    readerNoteStripQuotes: false,
+    readerNoteStripHighlightOpacity: 1,
+    readerNoteStripSpacing: 12,
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

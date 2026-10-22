@@ -13,16 +13,15 @@
  * answers its model downloads from blob URLs.
  */
 import { gunzipSync } from "fflate";
-import { loadPdfJs } from "obsidian";
 import { createWorker } from "tesseract.js";
 import ocrResource from "virtual:ocr-resources";
 
 import { services } from "services/services";
-import { invert } from "utils/evo-pdf-ocr-layer";
+import { openPdf } from "ui/reader/evo-pdf-render";
+import type { OpenedPdf } from "ui/reader/evo-pdf-render";
 import { BUNDLED_OCR_LANGUAGES, ocrFolder } from "ui/reader/evo-ocr-languages";
 
 import type { ImageLike, Worker as TesseractWorker } from "tesseract.js";
-import type { Matrix } from "utils/evo-pdf-ocr-layer";
 import type { OcrPageText } from "utils/evo-pdf-rewrite";
 
 /** A URL the workers' downloads are answered for (never fetched). */
@@ -100,78 +99,12 @@ async function makeAssets(languages: string[]): Promise<Assets> {
 }
 
 /** A page drawn in grey as a PGM image (Tesseract reads it as it is). */
-interface PageImage {
-    pgm: Uint8Array;
-    width: number;
-    height: number;
-    dpi: number;
-    toUser: Matrix;
-}
-
-/** What is used of Obsidian's pdf.js. */
-interface PdfJsLib {
-    getDocument(o: { data: Uint8Array }): {
-        promise: Promise<{ getPage(n: number): Promise<PdfJsPage> }>;
-        destroy?: () => Promise<void> | void;
-    };
-    AnnotationMode?: { DISABLE?: number };
-}
-
-interface PdfJsPage {
-    getViewport(o: { scale: number }): {
-        width: number;
-        height: number;
-        transform: number[];
-    };
-    render(o: Record<string, unknown>): { promise: Promise<void> };
-    cleanup(): void;
-}
-
-async function drawPage(
-    page: PdfJsPage,
-    annotationModeDisable: number | undefined,
-): Promise<PageImage> {
-    const unit = page.getViewport({ scale: 1 });
-    let scale = DPI / 72;
-    const area = unit.width * unit.height * scale * scale;
-    if (area > MAX_PIXELS) scale *= Math.sqrt(MAX_PIXELS / area);
-    const side = Math.max(unit.width, unit.height) * scale;
-    if (side > MAX_SIDE) scale *= MAX_SIDE / side;
-    const viewport = page.getViewport({ scale });
-    const width = Math.max(1, Math.floor(viewport.width));
-    const height = Math.max(1, Math.floor(viewport.height));
-    const canvas = createEl("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) throw new Error("No canvas to draw the page on.");
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
-    await page.render({
-        canvasContext: ctx,
-        canvas,
-        viewport,
-        ...(annotationModeDisable !== undefined
-            ? { annotationMode: annotationModeDisable }
-            : {}),
-    }).promise;
-    const rgba = ctx.getImageData(0, 0, width, height).data;
-    canvas.width = 0;
-    canvas.height = 0;
-    page.cleanup();
+function toPgm(gray: Uint8Array, width: number, height: number): Uint8Array {
     const head = new TextEncoder().encode(`P5\n${width} ${height}\n255\n`);
-    const pgm = new Uint8Array(head.length + width * height);
+    const pgm = new Uint8Array(head.length + gray.length);
     pgm.set(head);
-    for (let i = 0, j = head.length; i < rgba.length; i += 4, j++)
-        pgm[j] =
-            (rgba[i]! * 299 + rgba[i + 1]! * 587 + rgba[i + 2]! * 114) / 1000;
-    return {
-        pgm,
-        width,
-        height,
-        dpi: Math.round(scale * 72),
-        toUser: invert(viewport.transform as Matrix),
-    };
+    pgm.set(gray, head.length);
+    return pgm;
 }
 
 export interface OcrProgress {
@@ -202,11 +135,10 @@ export async function recognizePages(
     const langs = languages.length ? languages : ["eng"];
     const assets = await makeAssets(langs);
     const workers: TesseractWorker[] = [];
-    const pdfjs = (await loadPdfJs()) as PdfJsLib;
-    const task = pdfjs.getDocument({ data: bytes.slice() });
+    let pdf: OpenedPdf | null = null;
     try {
-        const pdf = await task.promise;
-        const annotationModeDisable = pdfjs.AnnotationMode?.DISABLE;
+        pdf = await openPdf(bytes);
+        const opened = pdf;
         const count = Math.max(
             1,
             Math.min(
@@ -240,22 +172,28 @@ export async function recognizePages(
                 if (signal?.aborted) throw new OcrCancelled();
                 const index = pages[next++]!;
                 try {
-                    const draw = drawing.then(async () =>
-                        drawPage(
-                            await pdf.getPage(index + 1),
-                            annotationModeDisable,
-                        ),
+                    const draw = drawing.then(() =>
+                        opened.draw(index, {
+                            scale: DPI / 72,
+                            maxPixels: MAX_PIXELS,
+                            maxSide: MAX_SIDE,
+                        }),
                     );
                     drawing = draw.catch(() => undefined);
                     const image = await draw;
-                    if (image.dpi !== dpi) {
-                        dpi = image.dpi;
+                    const imageDpi = Math.round(image.scale * 72);
+                    if (imageDpi !== dpi) {
+                        dpi = imageDpi;
                         await worker.setParameters({
                             user_defined_dpi: String(dpi),
                         });
                     }
                     const result = await worker.recognize(
-                        image.pgm as unknown as ImageLike,
+                        toPgm(
+                            image.gray,
+                            image.width,
+                            image.height,
+                        ) as unknown as ImageLike,
                         { pdfTextOnly: true },
                         { text: false, blocks: false, pdf: true },
                     );
@@ -291,7 +229,7 @@ export async function recognizePages(
         await Promise.all(
             workers.map((w) => w.terminate().catch(() => undefined)),
         );
-        void Promise.resolve(task.destroy?.()).catch(() => undefined);
+        pdf?.close();
         for (const url of assets.urls) URL.revokeObjectURL(url);
     }
 }

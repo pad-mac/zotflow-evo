@@ -489,6 +489,54 @@ export class IframeReaderBridge {
                 };
             },
 
+            evoMountItemEditor: (container: HTMLElement) => {
+                const item = this.attachmentItem;
+                if (!item) return null;
+                // The item the PDF belongs to (a PDF on its own: the PDF).
+                const key = item.parentItem || item.key;
+                let gone = false;
+                let unmount: (() => void) | null = null;
+                // Loaded when first opened: the editor brings the library's
+                // parts with it, which the reader needs nowhere else.
+                void Promise.all([
+                    import("react"),
+                    import("react-dom/client"),
+                    import("ui/evo-library/ItemEditor"),
+                ]).then(([react, dom, editor]) => {
+                    if (gone) return;
+                    const root = dom.createRoot(container);
+                    root.render(
+                        react.createElement(editor.ItemEditor, {
+                            libraryID: item.libraryID,
+                            itemKey: key,
+                            withAbstract: true,
+                        }),
+                    );
+                    unmount = () => root.unmount();
+                });
+                return {
+                    unload: () => {
+                        gone = true;
+                        unmount?.();
+                    },
+                };
+            },
+
+            evoPdfBackups: async () => {
+                const item = this.attachmentItem;
+                if (!item) return [];
+                const list = await workerBridge.evoLibrary.pdfBackups(
+                    item.libraryID,
+                    item.key,
+                );
+                return list.map((b) => ({
+                    key: b.key,
+                    at: b.at,
+                    done: b.done,
+                    synced: b.synced,
+                }));
+            },
+
             evoOpenOcrSettings: () => {
                 const setting = (
                     services.app as unknown as {

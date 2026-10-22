@@ -332,21 +332,46 @@ export async function uploadFileBytes(
 }
 
 /**
- * A new stored-file attachment without a parent item (a standalone PDF), in
- * a collection or not, with its file. Returns its key.
+ * A new stored-file attachment with its file: under `parentItem`, or on its
+ * own in a collection (or none); `deleted` puts it straight in the trash.
+ * Returns its key.
  */
-export async function createStandaloneAttachment(
+export async function createAttachmentWithFile(
     libraryID: number,
-    collectionKey: string | null,
+    fields: {
+        parentItem?: string | null;
+        collectionKey?: string | null;
+        title: string;
+        filename: string;
+        note?: string;
+        tags?: string[];
+        deleted?: boolean;
+    },
     bytes: Uint8Array,
-    filename: string,
-    title: string,
 ): Promise<string> {
     const refusal = attachRefusal(libraryID);
     if (refusal) throw new Error(refusal);
     const prefix = services.libraryCache.isGroup(libraryID)
         ? `groups/${libraryID}`
         : `users/${libraryID}`;
+    const item: Record<string, unknown> = {
+        itemType: "attachment",
+        linkMode: "imported_file",
+        title: fields.title,
+        accessDate: "",
+        url: "",
+        note: fields.note ?? "",
+        contentType: "application/pdf",
+        charset: "",
+        filename: fields.filename,
+        md5: null,
+        mtime: null,
+        tags: (fields.tags ?? []).map((tag) => ({ tag })),
+        relations: {},
+    };
+    if (fields.parentItem) item.parentItem = fields.parentItem;
+    else item.collections = fields.collectionKey ? [fields.collectionKey] : [];
+    if (fields.deleted) item.deleted = 1;
     const created = await requestUrl({
         url: `https://api.zotero.org/${prefix}/items`,
         method: "POST",
@@ -356,24 +381,7 @@ export async function createStandaloneAttachment(
             "Zotero-Write-Token": writeToken(),
         },
         contentType: "application/json",
-        body: JSON.stringify([
-            {
-                itemType: "attachment",
-                linkMode: "imported_file",
-                title,
-                accessDate: "",
-                url: "",
-                note: "",
-                contentType: "application/pdf",
-                charset: "",
-                filename,
-                md5: null,
-                mtime: null,
-                collections: collectionKey ? [collectionKey] : [],
-                tags: [],
-                relations: {},
-            },
-        ]),
+        body: JSON.stringify([item]),
         throw: false,
     });
     const json = jsonOf<{
@@ -385,8 +393,26 @@ export async function createStandaloneAttachment(
         throw new Error(
             `Zotero refused the new PDF (${created.status}${json?.failed?.["0"]?.message ? ": " + json.failed["0"].message : ""}).`,
         );
-    await uploadFileBytes({ libraryID, key }, bytes, filename, null);
+    await uploadFileBytes({ libraryID, key }, bytes, fields.filename, null);
     return key;
+}
+
+/**
+ * A new stored-file attachment without a parent item (a standalone PDF), in
+ * a collection or not, with its file. Returns its key.
+ */
+export async function createStandaloneAttachment(
+    libraryID: number,
+    collectionKey: string | null,
+    bytes: Uint8Array,
+    filename: string,
+    title: string,
+): Promise<string> {
+    return createAttachmentWithFile(
+        libraryID,
+        { collectionKey, title, filename },
+        bytes,
+    );
 }
 
 /** Why this item cannot take a file from here, or null. */

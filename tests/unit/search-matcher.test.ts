@@ -112,3 +112,48 @@ describe("SearchMatcher non-Latin free text", () => {
         ).toEqual([matching]);
     });
 });
+
+describe("ZotFlow Evo: years", () => {
+    const a = record("a", {
+        name: "Lebendige Kräfte",
+        creators: ["Schmidgen"],
+        year: "2005",
+    });
+    const b = record("b", {
+        name: "Die Helmholtz-Kurven",
+        creators: ["Schmidgen"],
+        year: "2009",
+    });
+    const c = record("c", {
+        name: "Aufschreibesysteme",
+        creators: ["Kittler"],
+        year: "1985",
+    });
+    const d = record("d", { name: "Undated", creators: ["Schmidgen"] });
+
+    test("a year in the query is matched exactly, with other words", () => {
+        expect(match("schmidgen 2005", [a, b, c, d])).toEqual([a]);
+        expect(match("2006", [a, b, c, d])).toEqual([]);
+    });
+
+    test("year: one year, or a range with open ends; negated", () => {
+        expect(match("year:2009", [a, b, c, d])).toEqual([b]);
+        expect(match("year:1980-2006", [a, b, c, d])).toEqual([a, c]);
+        expect(match("year:2006-", [a, b, c, d])).toEqual([b]);
+        expect(match("year:-1990", [a, b, c, d])).toEqual([c]);
+        expect(
+            match("schmidgen -year:2005", [a, b, c, d])
+                .map((r) => r.id)
+                .sort(),
+        ).toEqual(["b", "d"]);
+    });
+
+    test("the year of a Zotero date", async () => {
+        const { yearOfDate } = await import("worker/services/search-matcher");
+        expect(yearOfDate("2005-03-01 2005-03-01")).toBe("2005");
+        expect(yearOfDate("March 1986")).toBe("1986");
+        expect(yearOfDate("ca. 1900")).toBe("1900");
+        expect(yearOfDate("12345")).toBeUndefined();
+        expect(yearOfDate("")).toBeUndefined();
+    });
+});

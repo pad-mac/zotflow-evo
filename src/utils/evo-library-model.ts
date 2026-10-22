@@ -1023,3 +1023,25 @@ export function attachmentRename(
         ? { filename, title: filename }
         : { filename };
 }
+
+/**
+ * ZotFlow Evo: where an item was published as the item pane shows it. A
+ * journal article gets its volume, issue and pages after the journal, as
+ * Chicago author-date writes them: "Journal 12 (3): 45–67" (without a
+ * volume: "Journal, no. 3: 45–67").
+ */
+export function publicationLine(
+    itemType: string,
+    parts: { publication: string; volume?: string; issue?: string; pages?: string },
+): string {
+    const publication = parts.publication.trim();
+    if (itemType !== "journalArticle" || !publication) return publication;
+    const volume = (parts.volume ?? "").trim();
+    const issue = (parts.issue ?? "").trim();
+    const pages = (parts.pages ?? "").trim().replace(/(\d)\s*-+\s*(\d)/g, "$1–$2");
+    let line = publication;
+    if (volume) line += ` ${volume}`;
+    if (issue) line += volume ? ` (${issue})` : `, no. ${issue}`;
+    if (pages) line += `: ${pages}`;
+    return line;
+}

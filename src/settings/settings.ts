@@ -32,17 +32,38 @@ export class ZotFlowSettingTab extends PluginSettingTab {
         this.cacheSection = new CacheSection(plugin, requestUpdate);
     }
 
+    /**
+     * The pages. ZotFlow Evo (beta.12): the fork's settings are no longer a
+     * page of their own; each group sits with upstream's on the same thing
+     * (the note strip with the reader, automatic sync with sync, the library
+     * browser and authors on a Library page, dragging into notes and links
+     * with source notes).
+     */
     getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
+        const evo = new EvoSection(this.plugin).groups();
+        const pick = (...headings: string[]) =>
+            headings
+                .map((h) => evo.get(h))
+                .filter((g): g is SettingDefinitionItem<SettingKey> => !!g);
+        // Upstream's "General" held the source notes and reader pages and
+        // the item display group; they stand on their own now.
+        const general = new GeneralSection(this.plugin).getDefinitions();
+        const page = (name: string) =>
+            general.find((g) => (g as { name?: string }).name === name) as
+                | { items?: SettingDefinitionItem<SettingKey>[] }
+                | undefined;
+        const itemDisplay = general.filter(
+            (g) => (g as { heading?: string }).heading === "Item Display",
+        );
+        const dropTables = this.dropTables(evo);
         return [
             {
                 type: "page",
-                name: "General",
-                items: new GeneralSection(this.plugin).getDefinitions(),
-            },
-            {
-                type: "page",
                 name: "Sync",
-                items: this.syncSection.getDefinitions(),
+                items: [
+                    ...this.syncSection.getDefinitions(),
+                    ...pick("Automatic sync"),
+                ],
             },
             {
                 type: "page",
@@ -51,8 +72,32 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             },
             {
                 type: "page",
-                name: "Cache",
-                items: this.cacheSection.getDefinitions(),
+                name: "Source Notes",
+                desc: "Templates, paths, editable regions, annotation assets; links to source notes; dragging into notes.",
+                items: [
+                    ...(page("Source Notes")?.items ?? []),
+                    ...pick("Links to source notes", "Dragging into notes"),
+                    ...dropTables,
+                ],
+            },
+            {
+                type: "page",
+                name: "Reader",
+                desc: "Reader integration, annotation tools, fonts, color themes; the note strip; OCR.",
+                items: [
+                    ...(page("Reader")?.items ?? []),
+                    ...pick("Note strip", "Note strip appearance", "OCR"),
+                ],
+            },
+            {
+                type: "page",
+                name: "Library",
+                desc: "The library browser, how items are titled, notes for authors.",
+                items: [
+                    ...pick("Library browser"),
+                    ...itemDisplay,
+                    ...pick("Authors"),
+                ],
             },
             {
                 type: "page",
@@ -64,14 +109,21 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 name: "CSL Render",
                 items: new CslSection(this.plugin).getDefinitions(),
             },
-            // ZotFlow Evo: the fork's own settings.
             {
                 type: "page",
-                name: "ZotFlow Evo",
-                desc: "Note strip beside PDFs, dragging comments and highlights into notes, automatic sync.",
-                items: new EvoSection(this.plugin).getDefinitions(),
+                name: "Cache",
+                items: this.cacheSection.getDefinitions(),
             },
         ];
+    }
+
+    /** The two tables of text around dropped highlights and comments. */
+    private dropTables(
+        evo: Map<string, SettingDefinitionItem<SettingKey>>,
+    ): SettingDefinitionItem<SettingKey>[] {
+        return [...evo.entries()]
+            .filter(([heading]) => heading.includes("dropped into a note"))
+            .map(([, group]) => group);
     }
 
     getControlValue(key: string): unknown {

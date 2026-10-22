@@ -34,7 +34,9 @@ import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
 import type { ZotFlowSettings } from "settings/types";
 import type { IParentProxy } from "bridge/types";
 import type { LibraryService } from "./library";
+import { yearOfDate } from "./search-matcher";
 import type { SearchMatcher, SearchableRecord } from "./search-matcher";
+import { getField } from "utils/zotero-fields";
 import type { DisplayTitleService } from "./display-title";
 import { Zotero_Item_Types } from "types/zotero-item-const";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
@@ -379,6 +381,7 @@ export class TreeViewService {
                     itemType: item.itemType,
                     creators: item.searchCreators,
                     tags: item.searchTags,
+                    year: yearOfDate(getField(item.raw.data, "date")),
                     libraryName: libName,
                     collections: (item.collections || []).map(
                         (k) => colNameByKey.get(`${item.libraryID}:${k}`) || "",

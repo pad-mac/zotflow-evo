@@ -12,6 +12,7 @@ import { workerBridge } from "bridge";
 import { EventBus } from "services/event-bus";
 import { services } from "services/services";
 import { revealInLibrary } from "ui/evo-library/actions";
+import { openPersonNote } from "ui/evo-person";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import { isNeutralPdfFilter, sanitizePdfFilter } from "utils/evo-pdf-filter";
 
@@ -191,11 +192,7 @@ export function connectStripOnly(
         };
         if (event.id === "title-menu") handlers.onTitleMenu(at);
         else if (event.id.startsWith("person:"))
-            void view.app.workspace.openLinkText(
-                event.id.slice("person:".length),
-                "",
-                false,
-            );
+            void openPersonNote(view.app, event.id.slice("person:".length));
     });
     return offChrome;
 }
@@ -230,6 +227,11 @@ function noteStripSettings(): ReaderNoteStrip {
         collapsed: settings.readerNoteStripList,
         width: settings.readerNoteStripWidth,
         highlights: settings.readerNoteStripHighlights,
+        appearance: {
+            quotes: settings.readerNoteStripQuotes,
+            highlightOpacity: settings.readerNoteStripHighlightOpacity,
+            spacing: settings.readerNoteStripSpacing,
+        },
     };
 }
 
@@ -498,10 +500,9 @@ class ReaderChromeControls {
                 return;
             }
             if (event.id.startsWith("person:")) {
-                void this.view.app.workspace.openLinkText(
+                void openPersonNote(
+                    this.view.app,
                     event.id.slice("person:".length),
-                    "",
-                    false,
                 );
                 return;
             }

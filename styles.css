@@ -4932,3 +4932,45 @@ body.zotflow-evo-col-resizing * {
     flex: none;
     margin-inline-start: 12px;
 }
+
+/* ----- Item pane: no year, the edit button, the editor ----- */
+
+.zotflow-evo-details-year.is-missing {
+    color: var(--text-faint);
+    font-style: italic;
+}
+
+/* A row of its own above the annotations (so they do not move when the
+   button shows); the button only while the pointer is over the pane. */
+.zotflow-evo-details-actions {
+    display: flex;
+    flex: none;
+    justify-content: flex-end;
+    min-height: 26px;
+    padding: 0 10px;
+}
+
+.zotflow-evo-details-edit {
+    opacity: 0;
+    transition: opacity 140ms ease-out;
+}
+
+.zotflow-evo-details:hover .zotflow-evo-details-edit,
+.zotflow-evo-details-edit:focus-visible,
+.zotflow-evo-details-edit.is-on {
+    opacity: 1;
+    transition-duration: 90ms;
+}
+
+.zotflow-evo-details-editor {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 45%;
+    overflow-y: auto;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-evo-details-abstract.is-editing {
+    padding: 6px 10px;
+    white-space: normal;
+}

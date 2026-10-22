@@ -38,10 +38,12 @@ import {
     removeInvisibleText,
 } from "utils/evo-pdf-ocr-layer";
 import { rotationMatrix, splitBoxes } from "utils/evo-pdf-geometry";
+import { writeOutline, writePageLabels } from "utils/evo-pdf-labels";
 
 import type { PdfFilter } from "utils/evo-pdf-filter";
 import type { Matrix } from "utils/evo-pdf-ocr-layer";
 import type { Box, PagePlan } from "utils/evo-pdf-geometry";
+import type { OutlineEntry, PageLabelRange } from "utils/evo-pdf-labels";
 
 /** The text recognized on one page: Tesseract's text-only PDF of its image. */
 export interface OcrPageText {
@@ -58,6 +60,10 @@ export interface RewriteRequest {
     split?: { shared: number; pages: Record<string, number> };
     straighten?: Record<string, number>;
     removeOutline?: boolean;
+    /** New page labels (an empty list removes them). */
+    pageLabels?: PageLabelRange[];
+    /** A new outline (an empty list removes it); replaces `removeOutline`. */
+    outline?: OutlineEntry[];
     pageFilter?: PdfFilter;
 }
 
@@ -202,7 +208,15 @@ export async function rewritePdf(
         done.push(`split ${count} ${count === 1 ? "page" : "pages"}`);
     }
 
-    if (request.removeOutline && doc.catalog.has(PDFName.of("Outlines"))) {
+    if (request.outline) {
+        writeOutline(doc, request.outline);
+        const n = request.outline.filter((e) => e.title.trim()).length;
+        done.push(
+            n
+                ? `set the outline (${n} ${n === 1 ? "entry" : "entries"})`
+                : "removed the outline",
+        );
+    } else if (request.removeOutline && doc.catalog.has(PDFName.of("Outlines"))) {
         doc.catalog.delete(PDFName.of("Outlines"));
         const mode = doc.catalog.get(PDFName.of("PageMode"));
         if (mode instanceof PDFName && mode.asString() === "/UseOutlines")
@@ -210,6 +224,15 @@ export async function rewritePdf(
         done.push("removed the outline");
     } else if (request.removeOutline) {
         done.push("no outline to remove");
+    }
+
+    if (request.pageLabels) {
+        writePageLabels(doc, request.pageLabels);
+        done.push(
+            request.pageLabels.length
+                ? "set the page numbers"
+                : "removed the page numbers",
+        );
     }
 
     if (request.pageFilter) writeFilterInfo(doc, request.pageFilter);

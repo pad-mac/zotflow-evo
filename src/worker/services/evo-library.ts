@@ -8,7 +8,8 @@ import { Liquid } from "liquidjs";
 
 import { db, getCombinations } from "db/db";
 import { getAnnotationJson } from "db/annotation";
-import { mutateItems } from "db/mutate";
+import { deleteLocalItems, mutateItems } from "db/mutate";
+import { BACKUP_TAG, parseBackupNote } from "utils/evo-pdf-backup";
 import { remapPosition, sortIndexOnPage } from "utils/evo-pdf-geometry";
 import { normalizeCollection } from "db/normalize";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
@@ -23,17 +24,20 @@ import {
     lastName,
     mainCreators,
     plainTitle,
+    publicationLine,
     sanitizeFilename,
 } from "utils/evo-library-model";
 import { extractYear } from "utils/date";
 import { getField } from "utils/zotero-fields";
 import { Zotero_Item_Types } from "types/zotero-item-const";
+import { ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
 
 import type { LibraryService } from "./library";
 import type { IParentProxy } from "bridge/types";
 import type { ZotFlowSettings } from "settings/types";
 import type { AnyIDBZoteroItem, IDBZoteroCollection } from "types/db-schema";
 import type { PagePlan, PdfPosition } from "utils/evo-pdf-geometry";
+import type { PdfBackupInfo } from "utils/evo-pdf-backup";
 import type { ZoteroCollection } from "types/zotero";
 import type { AnnotationJSON } from "types/zotero-reader";
 import type {
@@ -460,11 +464,17 @@ export class EvoLibraryService {
      * evo-pdf-geometry). With `relabel`, page labels become page numbers
      * (the file's page labels were removed). Local edits, synced as usual.
      */
+    /**
+     * ZotFlow Evo: the annotations of a PDF after its file was rewritten
+     * (PDF editing, or a revert): their places through each stage of page
+     * plans in turn, and their page labels from `labels` (the new file's,
+     * by page index) when given.
+     */
     async remapAnnotations(
         libraryID: number,
         attachmentKey: string,
-        plans: PagePlan[],
-        relabel: boolean,
+        stages: PagePlan[][],
+        labels: string[] | null,
     ): Promise<EvoEditResult> {
         await this.assertWritable(libraryID);
         const annotations = await db.items
@@ -493,22 +503,27 @@ export class EvoLibraryService {
             } catch {
                 continue;
             }
-            const moved = remapPosition(position, plans);
+            let moved: PdfPosition | null = position;
+            for (const plans of stages) {
+                if (!moved) break;
+                moved = remapPosition(moved, plans);
+            }
             if (!moved) continue;
-            const label = relabel ? String(moved.pageIndex + 1) : undefined;
+            const label = labels?.[moved.pageIndex];
             if (
                 JSON.stringify(moved) === JSON.stringify(position) &&
                 (label === undefined || label === data.annotationPageLabel)
             )
                 continue;
+            const at = moved;
             edits.push({
                 key: item.key,
                 edit: (d) => {
                     const fields = d as typeof data;
-                    fields.annotationPosition = JSON.stringify(moved);
+                    fields.annotationPosition = JSON.stringify(at);
                     fields.annotationSortIndex = sortIndexOnPage(
                         fields.annotationSortIndex ?? "",
-                        moved.pageIndex,
+                        at.pageIndex,
                     );
                     if (label !== undefined) fields.annotationPageLabel = label;
                 },
@@ -518,6 +533,76 @@ export class EvoLibraryService {
         const written = await mutateItems(libraryID, edits);
         const changed = written.filter(Boolean).length;
         return { changed, skipped: edits.length - changed };
+    }
+
+    /**
+     * ZotFlow Evo: the copies kept before edits of a PDF (in the trash,
+     * beside it), newest first, with whether each has its file here yet.
+     */
+    async pdfBackups(
+        libraryID: number,
+        attachmentKey: string,
+    ): Promise<(PdfBackupInfo & { key: string; synced: boolean })[]> {
+        const original = await db.items.get([libraryID, attachmentKey]);
+        if (!original) return [];
+        const parent = original.parentItem || null;
+        const trashed = parent
+            ? await db.items
+                  .where(["libraryID", "parentItem", "itemType", "trashed"])
+                  .equals([libraryID, parent, "attachment", 1])
+                  .toArray()
+            : (
+                  await db.items
+                      .where(["libraryID", "itemType", "trashed"])
+                      .equals([libraryID, "attachment", 1])
+                      .toArray()
+              ).filter((item) => !item.parentItem);
+        const out: (PdfBackupInfo & { key: string; synced: boolean })[] = [];
+        for (const item of trashed) {
+            const data = item.raw.data as {
+                note?: string;
+                md5?: string | null;
+                tags?: { tag: string }[];
+            };
+            if (!data.tags?.some((t) => t.tag === BACKUP_TAG)) continue;
+            const info = parseBackupNote(data.note);
+            if (!info || info.of !== attachmentKey) continue;
+            out.push({ ...info, key: item.key, synced: !!data.md5 });
+        }
+        return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+    }
+
+    /** ZotFlow Evo: delete items for good (copies a revert used up). */
+    async deleteForever(libraryID: number, keys: string[]): Promise<number> {
+        await this.assertWritable(libraryID);
+        const result = await deleteLocalItems(libraryID, keys);
+        return result.removed.length + result.trashed.length;
+    }
+
+    /**
+     * ZotFlow Evo: set fields of an item (the item pane's editor). Only
+     * fields its type has; "" empties one. Returns whether it changed.
+     */
+    async setItemFields(
+        libraryID: number,
+        key: string,
+        fields: Record<string, string>,
+    ): Promise<boolean> {
+        const item = await db.items.get([libraryID, key]);
+        if (!item) throw new ZotFlowError(ZotFlowErrorCode.UNKNOWN, "EvoLibrary", "The item is not here.");
+        const allowed = new Set(ITEM_TYPE_FIELDS[item.itemType] ?? []);
+        const patch = Object.entries(fields).filter(([name]) => allowed.has(name));
+        if (!patch.length) return false;
+        const result = await this.editItems(libraryID, [key], (data) => {
+            let changed = false;
+            for (const [name, value] of patch) {
+                if ((data[name] ?? "") === value) continue;
+                data[name] = value;
+                changed = true;
+            }
+            return changed;
+        });
+        return result.changed > 0;
     }
 
     /** Bring items back from the trash. */
@@ -878,7 +963,12 @@ export class EvoLibraryService {
             moreAuthors: main.length > 2,
             firstCreator: main[0] ? fullName(main[0]) : "",
             year: extractYear(field(item, "date")),
-            publication: field(item, "publicationTitle"),
+            publication: publicationLine(item.itemType, {
+                publication: field(item, "publicationTitle"),
+                volume: field(item, "volume"),
+                issue: field(item, "issue"),
+                pages: field(item, "pages"),
+            }),
             abstract: field(item, "abstractNote"),
             attachments: attachments.map((a) => ({
                 key: a.key,

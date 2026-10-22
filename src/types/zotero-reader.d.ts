@@ -72,6 +72,15 @@ export interface ReaderNoteStrip {
     banner?: NoteStripBanner;
     /** List the highlights themselves too, not only comments. */
     highlights?: boolean;
+    /** ZotFlow Evo: how the entries look (settings, "Note strip appearance"). */
+    appearance?: {
+        /** Quotation marks round the text of highlights. */
+        quotes?: boolean;
+        /** Opacity of the text of highlights (0.3 … 1). */
+        highlightOpacity?: number;
+        /** Room between entries in pixels (12 as before). */
+        spacing?: number;
+    };
     /**
      * The Obsidian view's header buttons, shown in the strip's head while
      * the header is hidden (a click comes back as `noteStripAction`).
@@ -218,6 +227,16 @@ export type ParentAPI = {
     }>;
     /** ZotFlow Evo: open the plugin's settings (to install OCR languages). */
     evoOpenOcrSettings?: () => void;
+    /**
+     * ZotFlow Evo: the item's data editor (abstract, citation key, type,
+     * fields) drawn into `container` (in the note strip's head); null for
+     * a PDF that is no Zotero item.
+     */
+    evoMountItemEditor?: (container: HTMLElement) => { unload: () => void } | null;
+    /** ZotFlow Evo: the copies of the open PDF kept before edits, newest first. */
+    evoPdfBackups?: () => Promise<
+        { key: string; at: string; done: string[]; synced: boolean }[]
+    >;
 };
 
 /** The upstream Reader owns successful SDT results for the lifetime of its document. */
@@ -311,8 +330,18 @@ export interface PdfEditRequest {
     ocr?: { languages: string[] };
     /** Cut pages in two: fractions of each page's width as shown. */
     split?: { shared: number; pages: Record<string, number> };
-    /** Pages to turn level: degrees each (positive: lines go down to the right). */
-    straighten?: Record<string, number>;
+    /**
+     * Turn tilted pages level: true, measured by the plugin after any split
+     * (since beta.12); or degrees by page (positive: lines go down to the
+     * right), as the reader measured until beta.11.
+     */
+    straighten?: Record<string, number> | boolean;
+    /** New page labels: ranges by the page they start on (0-based, before a split). */
+    pageLabels?: { start: number; style: "D" | "r"; first?: number }[];
+    /** A new outline (pages 0-based, before a split); [] removes it. */
+    outline?: { title: string; page: number; level: number }[];
+    /** Put back the copy kept before an edit (its attachment key in the trash). */
+    revert?: string;
     removeOutline?: boolean;
     /** Copy pages (0-based) into a new PDF in a collection. */
     extract?: { pages: number[]; collectionKey: string | null; open: boolean };

@@ -4,7 +4,9 @@ import { Zotero_Item_Types } from "types/zotero-item-const";
 import type { AnyIDBZoteroItem } from "types/db-schema";
 import type { DbHelperService } from "./db-helper";
 import type { DisplayTitleService } from "./display-title";
+import { yearOfDate } from "./search-matcher";
 import type { SearchMatcher, SearchableRecord } from "./search-matcher";
+import { getField } from "utils/zotero-fields";
 
 /**
  * Worker-side item search behind the search modals and their autocomplete:
@@ -159,6 +161,7 @@ export class SearchService {
                 ...this.displayTitle.searchNames(item),
                 creators: item.searchCreators,
                 tags: item.searchTags,
+                year: yearOfDate(getField(item.raw.data, "date")),
                 itemType: item.itemType,
                 libraryName: libraryNames.get(item.libraryID),
                 collections: collectionNames

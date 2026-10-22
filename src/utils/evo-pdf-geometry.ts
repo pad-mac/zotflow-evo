@@ -142,22 +142,15 @@ export function remapPosition(
             plan.turn.center[0],
             plan.turn.center[1],
         );
+        // A box keeps its size and moves with its middle: the text it covers
+        // was tilted and is level now, so a box the size it was fits it
+        // (turning its corners would only make it larger, every time).
         const turnRect = (r: number[]) => {
-            const pts = [
-                applyMatrix(m, r[0]!, r[1]!),
-                applyMatrix(m, r[2]!, r[1]!),
-                applyMatrix(m, r[0]!, r[3]!),
-                applyMatrix(m, r[2]!, r[3]!),
-            ];
-            const xs = pts.map((p) => p[0]);
-            const ys = pts.map((p) => p[1]);
+            const [cx, cy] = applyMatrix(m, (r[0]! + r[2]!) / 2, (r[1]! + r[3]!) / 2);
+            const hw = (r[2]! - r[0]!) / 2;
+            const hh = (r[3]! - r[1]!) / 2;
             const round = (v: number) => Math.round(v * 1000) / 1000;
-            return [
-                round(Math.min(...xs)),
-                round(Math.min(...ys)),
-                round(Math.max(...xs)),
-                round(Math.max(...ys)),
-            ];
+            return [round(cx - hw), round(cy - hh), round(cx + hw), round(cy + hh)];
         };
         if (out.rects) out.rects = out.rects.map(turnRect);
         if (out.nextPageRects) out.nextPageRects = undefined;
@@ -190,4 +183,27 @@ export function sortIndexOnPage(sortIndex: string, pageIndex: number): string {
     if (parts.length !== 3) return sortIndex;
     parts[0] = String(pageIndex).padStart(5, "0");
     return parts.join("|");
+}
+
+/**
+ * The plans that take the pages of a rewritten file back to the file it
+ * was made from (a revert): each new page to the page it came from, turned
+ * back. Splitting moves nothing in user space, so both halves map to their
+ * page as they are.
+ */
+export function invertPlans(plans: readonly PagePlan[]): PagePlan[] {
+    const out: PagePlan[] = [];
+    plans.forEach((plan, i) => {
+        const back: PagePlan = { newIndex: i };
+        if (plan.turn)
+            back.turn = { degrees: -plan.turn.degrees, center: plan.turn.center };
+        out[plan.newIndex] = back;
+        if (plan.split) out[plan.newIndex + 1] = { ...back };
+    });
+    return out;
+}
+
+/** Whether any page of these plans moves (turned, cut, or to another index). */
+export function plansMove(plans: readonly PagePlan[]): boolean {
+    return plans.some((p, i) => p.turn || p.split || p.newIndex !== i);
 }

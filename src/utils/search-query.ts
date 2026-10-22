@@ -42,7 +42,9 @@ export type SearchFilterField =
     | "tag"
     | "type"
     | "creator"
-    | "library";
+    | "library"
+    /** ZotFlow Evo: `year:2005`, `year:1980-1990`. */
+    | "year";
 
 /** Result of parsing a raw query string. */
 export interface ParsedQuery {
@@ -65,6 +67,7 @@ const FIELD_ALIASES: Record<string, SearchFilterField> = {
     author: "creator",
     library: "library",
     lib: "library",
+    year: "year",
 };
 
 /** Metadata describing a single supported search operator. */
@@ -116,6 +119,13 @@ export const SEARCH_OPERATORS: SearchOperator[] = [
         label: "type",
         aliases: ["type", "itemtype"],
         description: "items of an item type",
+    },
+    {
+        field: "year",
+        token: "year:",
+        label: "year",
+        aliases: ["year"],
+        description: "items from a year (or a range: 1980-1990)",
     },
 ];
 

@@ -25,7 +25,17 @@ export interface SearchableRecord {
     itemType?: string;
     /** Library NAME the record belongs to. */
     libraryName?: string;
+    /** ZotFlow Evo: the year of the item's date ("2005"), if it has one. */
+    year?: string;
 }
+
+/** ZotFlow Evo: the year in a Zotero date ("2005-03-01", "March 2005", "ca. 1900"). */
+export function yearOfDate(date: string | undefined): string | undefined {
+    return /(?:^|\D)(\d{4})(?!\d)/.exec(date ?? "")?.[1];
+}
+
+/** ZotFlow Evo: a free-text word that is a year: matched exactly, not fuzzily. */
+const YEAR_TERM_RE = /^\d{4}$/;
 
 /** Separator used when concatenating fields into a single fuzzy haystack. */
 const HAYSTACK_SEP = " \u00b7 ";
@@ -56,7 +66,10 @@ function partitionFreeText(query: ParsedQuery): {
     for (const token of query.freeTokens) {
         const words = foldForSearch(token).match(SEARCH_WORD_RE) ?? [];
         for (const word of words) {
-            if (ASCII_FUZZY_TERM_RE.test(word)) {
+            if (YEAR_TERM_RE.test(word)) {
+                // "2005" must not also find 2006 (fuzzy allows one typo).
+                literal.push(word);
+            } else if (ASCII_FUZZY_TERM_RE.test(word)) {
                 fuzzy.push(word);
             } else {
                 literal.push(word.toLowerCase());
@@ -154,6 +167,7 @@ export class SearchMatcher {
         if (r.aliases?.length) parts.push(...r.aliases);
         if (r.creators?.length) parts.push(r.creators.join(" "));
         if (r.tags?.length) parts.push(r.tags.join(" "));
+        if (r.year) parts.push(r.year);
         return parts.join(HAYSTACK_SEP);
     }
 
@@ -190,6 +204,18 @@ export class SearchMatcher {
                 return (r.creators ?? []).some((c) => includesNeedle(c));
             case "type":
                 return includesNeedle(r.itemType);
+            case "year": {
+                // "2005", or a range "1980-1990" (either end may be left open).
+                const year = Number(r.year);
+                if (!r.year || !Number.isFinite(year)) return false;
+                const range = /^(\d{0,4})\s*[-–]\s*(\d{0,4})$/.exec(value);
+                if (range) {
+                    const from = range[1] ? Number(range[1]) : -Infinity;
+                    const to = range[2] ? Number(range[2]) : Infinity;
+                    return year >= from && year <= to;
+                }
+                return r.year === value.trim();
+            }
             default:
                 return false;
         }

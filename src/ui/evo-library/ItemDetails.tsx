@@ -6,7 +6,7 @@
  * when long, and below a line the annotations of the file it opens, which
  * scroll on their own too. See FORK.md.
  */
-import { Keymap, Menu } from "obsidian";
+import { Menu } from "obsidian";
 import React, {
     useCallback,
     useEffect,
@@ -32,6 +32,8 @@ import {
     useColorFilter,
     useLibraryChanges,
 } from "ui/evo-library/parts";
+import { AbstractEditor, ItemEditor } from "ui/evo-library/ItemEditor";
+import { openPersonNote } from "ui/evo-person";
 import { annotationColors } from "utils/evo-library-model";
 import { notifyLinkedFile, openAttachment } from "utils/viewer";
 
@@ -113,11 +115,7 @@ function PersonLink({ app, name }: { app: App; name: string }) {
             className="zotflow-evo-person"
             onClick={(e) => {
                 e.stopPropagation();
-                void app.workspace.openLinkText(
-                    name,
-                    "",
-                    Keymap.isModEvent(e.nativeEvent),
-                );
+                void openPersonNote(app, name, e.nativeEvent);
             }}
         >
             {name}
@@ -136,6 +134,8 @@ export function ItemDetails({
     // The colour filter stays while the selection moves (colours the item
     // does not use are left out of it).
     const filter = useColorFilter();
+    // Editing stays on while the selection moves, until the button again.
+    const [editing, setEditing] = useState(false);
     const annotations = details?.annotations;
     const palette = useMemo(
         () => annotationColors(annotations ?? []),
@@ -197,10 +197,16 @@ export function ItemDetails({
                         {details.moreAuthors && " et al."}
                     </div>
                 )}
-                {details.year && (
+                {details.year ? (
                     <div className="zotflow-evo-details-year">
                         {details.year}
                     </div>
+                ) : (
+                    regular && (
+                        <div className="zotflow-evo-details-year is-missing">
+                            no year
+                        </div>
+                    )
                 )}
                 {details.publication && (
                     <div className="zotflow-evo-details-pub">
@@ -281,9 +287,51 @@ export function ItemDetails({
                     </div>
                 )}
             </div>
-            {details.abstract && (
-                <div className="zotflow-evo-details-abstract">
-                    {details.abstract}
+            {editing ? (
+                <div className="zotflow-evo-details-abstract is-editing">
+                    <AbstractEditor
+                        key={`${details.libraryID}:${details.key}`}
+                        libraryID={details.libraryID}
+                        itemKey={details.key}
+                        value={details.abstract}
+                    />
+                </div>
+            ) : (
+                details.abstract && (
+                    <div className="zotflow-evo-details-abstract">
+                        {details.abstract}
+                    </div>
+                )
+            )}
+            <div className="zotflow-evo-details-actions">
+                {details.itemType !== "note" && (
+                    <span
+                        className={
+                            "zotflow-evo-tool zotflow-evo-details-edit" +
+                            (editing ? " is-on" : "")
+                        }
+                        role="button"
+                        tabIndex={0}
+                        title={editing ? "Done editing" : "Edit the item's data"}
+                        aria-pressed={editing}
+                        onClick={() => setEditing((on) => !on)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setEditing((on) => !on);
+                            }
+                        }}
+                    >
+                        <Icon name="pencil" />
+                    </span>
+                )}
+            </div>
+            {editing && details.itemType !== "note" && (
+                <div className="zotflow-evo-details-editor">
+                    <ItemEditor
+                        libraryID={details.libraryID}
+                        itemKey={details.key}
+                    />
                 </div>
             )}
             {details.annotations.length > 0 && (
