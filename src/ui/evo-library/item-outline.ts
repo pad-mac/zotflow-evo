@@ -28,6 +28,7 @@ interface PdfOutlineNode {
 
 interface PdfDoc {
     getOutline(): Promise<PdfOutlineNode[] | null>;
+    getPageLabels?(): Promise<string[] | null>;
     getDestination(name: string): Promise<unknown[] | null>;
     getPageIndex(ref: unknown): Promise<number>;
     destroy(): Promise<void>;
@@ -104,7 +105,16 @@ async function read(libraryID: number, key: string): Promise<ItemOutline> {
     const doc = await task.promise;
     try {
         const headings = await readPdfOutline(doc);
-        return headings.length ? { state: "ok", headings } : { state: "none" };
+        if (!headings.length) return { state: "none" };
+        // The pages as the PDF numbers them ("iv", "245"), if it does.
+        const labels = await doc.getPageLabels?.().catch(() => null);
+        if (labels?.length) {
+            for (const h of headings) {
+                const label = labels[h.page];
+                if (label) h.label = label;
+            }
+        }
+        return { state: "ok", headings };
     } finally {
         void doc.destroy();
     }

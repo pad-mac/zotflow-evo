@@ -18,6 +18,7 @@
  * write to and whose files are in Zotero's storage (not WebDAV).
  */
 import { workerBridge } from "bridge";
+import { sharedFolderOf } from "ui/evo-library/shared-folder";
 import { services } from "services/services";
 import { noteLocalEdit } from "services/evo-auto-sync";
 import { PDFDocument } from "pdf-lib";
@@ -63,6 +64,8 @@ function refusalFor(item: IDBZoteroItem<AttachmentData>): string | null {
         return "Only PDFs can be edited.";
     if (data.linkMode !== "imported_file" && data.linkMode !== "imported_url")
         return "Only PDFs stored in Zotero can be edited here (this is a linked file).";
+    if (sharedFolderOf(item.libraryID))
+        return "This group keeps its files in a shared folder, which ZotFlow never changes.";
     return attachRefusal(item.libraryID);
 }
 

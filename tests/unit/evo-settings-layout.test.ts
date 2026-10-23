@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("services/services", () => ({ services: {} }));
+vi.mock("bridge", () => ({ workerBridge: {} }));
 vi.mock("ui/evo-strip/follow", () => ({ applyStripTabMode: vi.fn() }));
 vi.mock("ui/reader/chrome", () => ({ notifyReaderChromeChanged: vi.fn() }));
 vi.mock("ui/editor/evo-drop", () => ({ ANNOTATION_COLORS: [{ name: "Yellow", hex: "#ffd400" }] }));

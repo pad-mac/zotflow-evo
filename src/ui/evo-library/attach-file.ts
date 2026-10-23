@@ -22,6 +22,11 @@ import SparkMD5 from "spark-md5";
 
 import { workerBridge } from "bridge";
 import { services } from "services/services";
+import {
+    namePartsOfItem,
+    putSharedFile,
+    sharedFolderOf,
+} from "ui/evo-library/shared-folder";
 import { startSync } from "ui/start-sync";
 import { lastScope, lastSelection } from "ui/evo-library/selection";
 import {
@@ -351,6 +356,11 @@ export async function createAttachmentWithFile(
 ): Promise<string> {
     const refusal = attachRefusal(libraryID);
     if (refusal) throw new Error(refusal);
+    // ZotFlow Evo: PDF editing (the only caller) is off for such groups.
+    if (sharedFolderOf(libraryID))
+        throw new Error(
+            "This group keeps its files in a shared folder; ZotFlow does not make new ones there from the PDF editor.",
+        );
     const prefix = services.libraryCache.isGroup(libraryID)
         ? `groups/${libraryID}`
         : `users/${libraryID}`;
@@ -449,15 +459,35 @@ export async function uploadAttachment(
         ? `groups/${target.libraryID}`
         : `users/${target.libraryID}`;
     const api = `https://api.zotero.org/${prefix}`;
-    const named = parts
-        ? await workerBridge.evoLibrary.attachFilenameFor(parts)
-        : await workerBridge.evoLibrary.attachFilename(
-              target.libraryID,
-              target.key,
-          );
-    if (named.problem)
-        services.notificationService.notify("warning", named.problem);
-    const filename = `${named.name || "file"}.${file.extension}`;
+    // ZotFlow Evo: a group with a shared folder: the file goes there, named
+    // with the group's scheme; Zotero's storage never gets it.
+    const shared = sharedFolderOf(target.libraryID);
+    let filename: string;
+    if (shared) {
+        const sharedParts = parts
+            ? {
+                  lastNames: parts.lastName ? [parts.lastName] : [],
+                  year: parts.year,
+                  title: parts.title,
+              }
+            : await namePartsOfItem(target.libraryID, target.key);
+        filename = await putSharedFile(
+            shared,
+            sharedParts,
+            file.extension,
+            new Uint8Array(file.bytes),
+        );
+    } else {
+        const named = parts
+            ? await workerBridge.evoLibrary.attachFilenameFor(parts)
+            : await workerBridge.evoLibrary.attachFilename(
+                  target.libraryID,
+                  target.key,
+              );
+        if (named.problem)
+            services.notificationService.notify("warning", named.problem);
+        filename = `${named.name || "file"}.${file.extension}`;
+    }
 
     // 1. The attachment item (Zotero's template for a stored file).
     const created = await requestUrl({
@@ -500,13 +530,14 @@ export async function uploadAttachment(
         );
     }
 
-    // 2–4. The file, into Zotero's storage.
-    await uploadFileBytes(
-        { libraryID: target.libraryID, key: attachmentKey },
-        file.bytes,
-        filename,
-        null,
-    );
+    // 2–4. The file, into Zotero's storage (a shared folder has it already).
+    if (!shared)
+        await uploadFileBytes(
+            { libraryID: target.libraryID, key: attachmentKey },
+            file.bytes,
+            filename,
+            null,
+        );
 
     // Bring the new attachment here.
     void startSync(target.libraryID, true).catch(() => {

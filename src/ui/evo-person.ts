@@ -5,10 +5,10 @@
  * settings (Library, Authors) with the template set there, else where
  * Obsidian puts new notes, empty. The template's {{title}}, {{date}} and
  * {{time}} (with an optional format, {{date:YYYY-MM-DD}}) are filled in as
- * Obsidian's Templates plugin does; other syntax (Templater's) is left for
- * that plugin.
+ * Obsidian's Templates plugin does; a template with Templater commands
+ * (<% %>) is then made by Templater, so they run (beta.15).
  */
-import { Keymap, TFile, moment, normalizePath } from "obsidian";
+import { Keymap, TFile, TFolder, moment, normalizePath } from "obsidian";
 
 import { services } from "services/services";
 
@@ -38,6 +38,60 @@ export function fillPersonTemplate(
             );
         },
     );
+}
+
+/** What is used of Templater (templater-obsidian). */
+interface TemplaterApi {
+    create_new_note_from_template(
+        template: TFile | string,
+        folder?: TFolder | string,
+        filename?: string,
+        openNewNote?: boolean,
+    ): Promise<TFile | undefined>;
+}
+
+/**
+ * A new note made by Templater from `content` (its <% %> commands run, with
+ * tp.file.title the new note's name), when the text has commands and
+ * Templater is installed. Null otherwise, or when Templater fails (then
+ * the note is made as it is).
+ */
+async function createWithTemplater(
+    app: App,
+    dir: string,
+    fileName: string,
+    content: string,
+): Promise<TFile | null> {
+    if (!content.includes("<%")) return null;
+    const plugins = (
+        app as unknown as {
+            plugins?: { plugins?: Record<string, unknown> };
+        }
+    ).plugins?.plugins;
+    const templater = (
+        plugins?.["templater-obsidian"] as
+            | { templater?: Partial<TemplaterApi> }
+            | undefined
+    )?.templater;
+    if (typeof templater?.create_new_note_from_template !== "function")
+        return null;
+    const folder = app.vault.getAbstractFileByPath(dir);
+    try {
+        const file = await templater.create_new_note_from_template(
+            content,
+            folder instanceof TFolder ? folder : dir,
+            fileName,
+            false,
+        );
+        return file instanceof TFile ? file : null;
+    } catch (e) {
+        services.logService.error(
+            "Templater could not make the author's note",
+            "EvoLibrary",
+            e,
+        );
+        return null;
+    }
 }
 
 export async function openPersonNote(
@@ -80,9 +134,18 @@ export async function openPersonNote(
                 );
         }
         const path = normalizePath(`${dir}/${fileName}.md`);
-        const file =
+        let file =
             (app.vault.getAbstractFileByPath(path) as TFile | null) ??
-            (await app.vault.create(path, content));
+            (await createWithTemplater(app, dir, fileName, content));
+        if (!file) {
+            // Templater may have made the note and then failed on a command:
+            // write the template into it as it is.
+            const left = app.vault.getAbstractFileByPath(path);
+            if (left instanceof TFile) {
+                await app.vault.modify(left, content);
+                file = left;
+            } else file = await app.vault.create(path, content);
+        }
         await app.workspace.getLeaf(newLeaf ? "tab" : false).openFile(file);
     } catch (e) {
         services.logService.error(

@@ -235,6 +235,8 @@ export type ParentAPI = {
      * a PDF that is no Zotero item.
      */
     evoMountItemEditor?: (container: HTMLElement) => { unload: () => void } | null;
+    /** ZotFlow Evo: why the PDF editing menu is off for this file, or null. */
+    evoPdfEditBlocked?: () => string | null;
     /** ZotFlow Evo: the copies of the open PDF kept before edits, newest first. */
     evoPdfBackups?: () => Promise<
         { key: string; at: string; done: string[]; synced: boolean }[]

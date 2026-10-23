@@ -33,6 +33,7 @@ import { startSync } from "ui/start-sync";
 import { registerReaderChromeCommands } from "ui/reader/chrome";
 import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
 import { registerEvoLibrary } from "ui/evo-library/views";
+import { registerItemsBlock } from "ui/evo-library/items-block";
 import { registerAttachFromWebViewer } from "ui/evo-library/attach-file";
 import { registerSourceNoteLinks } from "ui/evo-source-links";
 import { registerEvoApi } from "services/evo-api";
@@ -306,6 +307,7 @@ export default class ZotFlow extends Plugin {
         registerReaderChromeCommands(this);
         registerEvoWorkspaceCommands(this);
         registerEvoLibrary(this);
+        registerItemsBlock(this);
         registerAttachFromWebViewer(this);
         // ZotFlow Evo: a click on a link to a source note opens the PDF.
         registerSourceNoteLinks(this);

@@ -197,6 +197,30 @@ export class ParentHost implements IParentProxy {
         }
     }
 
+    public async listExternalFolder(absolutePath: string): Promise<string[]> {
+        if (!Platform.isDesktop) {
+            throw new Error("Cannot list a folder outside the vault on mobile");
+        }
+        if (!Platform.isDesktopApp) {
+            throw new Error("External folders require the Obsidian desktop app");
+        }
+        // Same CommonJS constraint as `readExternalBinaryFile`.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- see readExternalBinaryFile
+        const { promises: fs } = require("fs") as typeof import("fs");
+        const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+        return entries.filter((e) => e.isFile()).map((e) => e.name);
+    }
+
+    public async evoPdfOutline(
+        libraryID: number,
+        key: string,
+        md5: string | undefined,
+    ) {
+        // Loaded when first asked: it reads the PDF with Obsidian's pdf.js.
+        const { itemOutline } = await import("ui/evo-library/item-outline");
+        return itemOutline(libraryID, key, md5);
+    }
+
     public async joinPath(...segments: string[]): Promise<string> {
         // Only ever joins an OS path for a linked attachment, so it shares
         // `readExternalBinaryFile`'s desktop-only constraint.

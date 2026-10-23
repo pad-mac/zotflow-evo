@@ -1316,7 +1316,7 @@ describe("built-in templates", () => {
     });
 
     test("getBuiltInTemplate is the default source-note template", async () => {
-        expect(service.getBuiltInTemplate()).toContain("citationKey:");
+        expect(service.getBuiltInTemplate()).toContain("{{ evo.yaml }}");
     });
 
     test("getFallbackCitationTemplate is what an empty setting renders", async () => {
@@ -1684,5 +1684,88 @@ describe("settings updates", () => {
 
         await render("{{ item | citation }}");
         expect(cslCalls[0]!.opts.styleId).toBe("ieee");
+    });
+});
+
+describe("ZotFlow Evo: the list-format default note", () => {
+    async function seedTwo() {
+        const item = await seedArticle();
+        await seedAttachment();
+        await seedAnnotation("ANNOTAT1", "ATTACH01", {
+            annotationPosition: JSON.stringify({ pageIndex: 4, rects: [[72, 500, 300, 514]] }),
+            annotationSortIndex: "00004|000300|00100",
+        });
+        await seedAnnotation("ANNOTAT2", "ATTACH01", {
+            annotationText: "second",
+            annotationComment: "",
+            annotationColor: "#ff6666",
+            annotationPageLabel: "9",
+            annotationPosition: JSON.stringify({ pageIndex: 8, rects: [[72, 600, 300, 614]] }),
+            annotationSortIndex: "00008|000100|00100",
+        });
+        return item;
+    }
+
+    test("the outline between the annotations, tags, comments nested, a data block", async () => {
+        const item = await seedTwo();
+        host.evoPdfOutline = async () => ({
+            state: "ok",
+            headings: [
+                { title: "Chapter One", level: 0, page: 0, top: null },
+                { title: "Chapter Two", level: 0, page: 7, top: null },
+                { title: "Unread", level: 0, page: 20, top: null },
+            ],
+        });
+        const out = await service.renderLibrarySourceNote(item, null, {});
+        if (process.env.ZF_SHOW_NOTE) (await import("node:fs")).writeFileSync(process.env.ZF_SHOW_NOTE, out);
+        expect(out).toContain("# A Study of Things");
+        expect(out).toContain("# Annotations\n\n## Chapter One\n\n- #hl/yellow “quoted **text**” · p. 5 ^ANNOTAT1\n\t- my *note*\n\n## Chapter Two\n\n- #hl/red “second” · p. 9 ^ANNOTAT2");
+        // The whole outline is kept in the data block; the note shows parts with annotations.
+        expect(out.split("%% zotflow-data")[0]).not.toContain("Unread");
+        expect(out).toMatch(/%% zotflow-data[^\n]*\n\{"attachment":"ATTACH01","md5":"","outline":/);
+        expect(out).toContain('"key":"ANNOTAT1"');
+        expect(out.trimEnd().endsWith("%%")).toBe(true);
+    });
+
+    test("an annotation gone from Zotero stays, struck through; the outline is read once", async () => {
+        const item = await seedTwo();
+        let reads = 0;
+        host.evoPdfOutline = async () => {
+            reads++;
+            return { state: "ok", headings: [{ title: "Only", level: 0, page: 0, top: null }] };
+        };
+        const first = await service.renderLibrarySourceNote(item, null, {});
+        await db.items.delete([LIB, "ANNOTAT2"]);
+        // The PDF is not on this device now: the outline comes from the note.
+        host.evoPdfOutline = async () => {
+            reads++;
+            return { state: "not-here" };
+        };
+        const second = await service.renderLibrarySourceNote(item, null, {}, undefined, first);
+        expect(reads).toBe(1);
+        expect(second).toContain("## Only");
+        expect(second).toMatch(/- #hl\/red ~~“second”~~ · p\. 9 · \*removed \d{4}-\d{2}-\d{2}\* \^ANNOTAT2/);
+        expect(second).toMatch(/"key":"ANNOTAT2".*"removed":"\d{4}-\d{2}-\d{2}"/);
+        // And the next update keeps it as it was.
+        const third = await service.renderLibrarySourceNote(item, null, {}, undefined, second);
+        expect(third.split("~~“second”~~").length).toBe(2);
+    });
+
+    test("properties of the old default template go; the user's own stay", async () => {
+        const item = await seedArticle();
+        const out = await service.renderLibrarySourceNote(item, null, {
+            creators: "Jane Doe",
+            publication: "Journal of Testing",
+            doi: "10.1000/test",
+            "reading-state": "reading",
+        });
+        const fm = out.split("---\n")[1]!;
+        expect(fm).not.toMatch(/^creators:/m);
+        expect(fm).not.toMatch(/^publication:/m);
+        expect(fm).not.toMatch(/^doi:/m);
+        expect(fm).toMatch(/^reading-state: reading/m);
+        expect(fm).not.toMatch(/^collections:/m);
+        expect(fm).toMatch(/^DOI: /m);
+        expect(fm).toMatch(/^publicationTitle: /m);
     });
 });

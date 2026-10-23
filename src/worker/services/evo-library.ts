@@ -30,7 +30,9 @@ import {
 import { extractYear } from "utils/date";
 import { getField } from "utils/zotero-fields";
 import { Zotero_Item_Types } from "types/zotero-item-const";
-import { ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
+import { ITEM_TYPE_CREATORS, ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
+import { makeCitationKey, uniqueCitationKey } from "utils/evo-citekey";
+import { sharedFolderFor } from "utils/evo-shared-folder";
 
 import type { LibraryService } from "./library";
 import type { IParentProxy } from "bridge/types";
@@ -74,6 +76,13 @@ export interface EvoScope {
     subcollections: boolean;
     /** The library's trash (its trashed items); `collectionKey` is then null. */
     trash?: boolean;
+    /**
+     * ZotFlow Evo (beta.15): the items a person is a creator of, in any
+     * role and in every library, by name as Zotero shows it ("Urs
+     * Stäheli"; case and accents' encoding do not matter). `libraryID` and
+     * `collectionKey` are then not used.
+     */
+    creator?: string;
 }
 
 /** An attachment as the details pane lists it. */
@@ -81,6 +90,8 @@ export interface EvoAttachmentInfo {
     key: string;
     title: string;
     kind: AttachmentKind;
+    /** A linked file (outside Zotero's storage; opens on desktop only). */
+    linked?: boolean;
     /** The file's md5 as Zotero has it (none before its first upload). */
     md5?: string;
 }
@@ -421,6 +432,13 @@ export class EvoLibraryService {
                 "EvoLibraryService",
                 "The attachment is not here (any more).",
             );
+        // ZotFlow Evo: the file name is the link into a group's shared folder.
+        if (sharedFolderFor(this.settings.evoGroupFolders, libraryID))
+            throw new ZotFlowError(
+                ZotFlowErrorCode.UNKNOWN,
+                "EvoLibraryService",
+                "This group keeps its files in a shared folder, where the name is what links them; it is not changed.",
+            );
         const parentKey = attachment.parentItem || attachment.key;
         const { name, problem } = await this.attachFilename(
             libraryID,
@@ -605,6 +623,96 @@ export class EvoLibraryService {
             return changed;
         });
         return result.changed > 0;
+    }
+
+    /**
+     * ZotFlow Evo: an item's creators replaced (the item editor). Each is
+     * `{ creatorType, firstName, lastName }` or `{ creatorType, name }`;
+     * roles the item type does not take are refused.
+     */
+    async setItemCreators(
+        libraryID: number,
+        key: string,
+        creators: {
+            creatorType: string;
+            firstName?: string;
+            lastName?: string;
+            name?: string;
+        }[],
+    ): Promise<boolean> {
+        const item = await db.items.get([libraryID, key]);
+        if (!item) throw new ZotFlowError(ZotFlowErrorCode.UNKNOWN, "EvoLibrary", "The item is not here.");
+        const takes = new Set(ITEM_TYPE_CREATORS[item.itemType] ?? []);
+        const clean = creators
+            .filter((c) => takes.has(c.creatorType))
+            .map((c) =>
+                c.name !== undefined
+                    ? { creatorType: c.creatorType, name: c.name.trim() }
+                    : {
+                          creatorType: c.creatorType,
+                          firstName: (c.firstName ?? "").trim(),
+                          lastName: (c.lastName ?? "").trim(),
+                      },
+            )
+            .filter((c) =>
+                "name" in c ? !!c.name : !!(c.lastName || c.firstName),
+            );
+        const result = await this.editItems(libraryID, [key], (data) => {
+            const before = JSON.stringify(data.creators ?? []);
+            if (before === JSON.stringify(clean)) return false;
+            data.creators = structuredClone(clean);
+            return true;
+        });
+        return result.changed > 0;
+    }
+
+    /**
+     * ZotFlow Evo: a citation key for the item from its data as it is now
+     * (Better BibTeX's default: auth.lower + shorttitle(3,3) + year), with
+     * a, b, … when another item of the library has it.
+     */
+    async suggestCitationKey(libraryID: number, key: string): Promise<string> {
+        const item = await db.items.get([libraryID, key]);
+        if (!item) return "";
+        const data = item.raw?.data as unknown as Record<string, unknown> | undefined;
+        const base = makeCitationKey({
+            title: field(item, "title"),
+            date: field(item, "date"),
+            creators: Array.isArray(data?.creators)
+                ? (data.creators as { creatorType?: string; firstName?: string; lastName?: string; name?: string }[])
+                : [],
+            primaryCreatorType: ITEM_TYPE_CREATORS[item.itemType]?.[0],
+        });
+        if (!base) return "";
+        const rows = await db.items
+            .where("[libraryID+itemType+trashed]")
+            .between([libraryID, "", 0], [libraryID, "\uffff", 1])
+            .toArray();
+        const taken = new Set<string>();
+        for (const r of rows) {
+            if (r.key === key) continue;
+            const k = field(r, "citationKey");
+            if (k) taken.add(k);
+        }
+        return uniqueCitationKey(base, taken);
+    }
+
+    /**
+     * ZotFlow Evo: the file names of a library's stored-file attachments
+     * (in the trash too): names a new file in a group's shared folder may
+     * not take.
+     */
+    async attachmentFilenames(libraryID: number): Promise<string[]> {
+        const rows = await db.items
+            .where(["libraryID", "itemType", "trashed"])
+            .anyOf(getCombinations([[libraryID], ["attachment"], [0, 1]]))
+            .toArray();
+        const out: string[] = [];
+        for (const r of rows) {
+            const name = (r.raw?.data as { filename?: unknown } | undefined)?.filename;
+            if (typeof name === "string" && name) out.push(name);
+        }
+        return out;
     }
 
     /** Bring items back from the trash. */
@@ -872,9 +980,56 @@ export class EvoLibraryService {
 
     /** The rows of the library table for a scope, unsorted. */
     async listItems(scope: EvoScope): Promise<EvoItemRow[]> {
-        const items = await this.topLevelItems(scope);
+        if (scope.creator !== undefined) {
+            const items = await this.creatorItems(scope.creator);
+            const byLibrary = new Map<number, AnyIDBZoteroItem[]>();
+            for (const item of items) {
+                const list = byLibrary.get(item.libraryID) ?? [];
+                list.push(item);
+                byLibrary.set(item.libraryID, list);
+            }
+            const rows: EvoItemRow[] = [];
+            for (const [libraryID, list] of byLibrary)
+                rows.push(...(await this.rowsOf(libraryID, list)));
+            return rows;
+        }
+        return this.rowsOf(scope.libraryID, await this.topLevelItems(scope));
+    }
+
+    /**
+     * The items with a creator of this name, in every library: top-level,
+     * not in the trash. Matched on "First Last" (or a one-field name) as the
+     * search index keeps it, ignoring case, in both Unicode forms.
+     */
+    private async creatorItems(name: string): Promise<AnyIDBZoteroItem[]> {
+        const wanted = name.replace(/\s+/g, " ").trim();
+        if (!wanted) return [];
+        const forms = [...new Set([wanted, wanted.normalize("NFC"), wanted.normalize("NFD")])];
+        const found = await db.items
+            .where("searchCreators")
+            .anyOfIgnoreCase(forms)
+            .toArray();
+        const seen = new Set<string>();
+        return found.filter((i) => {
+            const id = `${i.libraryID}:${i.key}`;
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return (
+                i.trashed === 0 &&
+                !i.parentItem &&
+                i.itemType !== "annotation" &&
+                i.itemType !== "note"
+            );
+        });
+    }
+
+    /** Table rows for items of one library. */
+    private async rowsOf(
+        libraryID: number,
+        items: AnyIDBZoteroItem[],
+    ): Promise<EvoItemRow[]> {
         const { attachmentsByParent, annotationCount } = await this.children(
-            scope.libraryID,
+            libraryID,
             items,
         );
         return items.map((item) => {
@@ -976,6 +1131,9 @@ export class EvoLibraryService {
                 key: a.key,
                 title: a.title || field(a, "title") || "Attachment",
                 kind: this.kindOf(a),
+                linked:
+                    (a.raw?.data as { linkMode?: string } | undefined)
+                        ?.linkMode === "linked_file",
                 md5:
                     (a.raw?.data as { md5?: string } | undefined)?.md5 ||
                     undefined,

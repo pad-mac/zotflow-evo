@@ -37,6 +37,20 @@ import type {
 } from "worker/csl";
 import { buildItemMetadata } from "utils/zotero-fields";
 import {
+    isManagedProperty,
+    mergeRemoved,
+    noteProperties,
+    parseNoteData,
+    propertiesYaml,
+    renderAnnotations,
+    serializeNoteData,
+} from "utils/evo-source-note";
+import { attachmentKind, choosePrimaryAttachment } from "utils/evo-library-model";
+import { ZOTERO_FIELDS } from "types/zotero-base-fields";
+import { ITEM_TYPE_CREATORS } from "types/zotero-csl-schema";
+import type { NoteAnnotation, NoteOutline, RenderFile } from "utils/evo-source-note";
+import type { OutlineHeading } from "utils/evo-outline-list";
+import {
     mandatoryKeyHint,
     previewResult,
     renderFragment,
@@ -58,77 +72,38 @@ import {
     withMandatoryFirst,
 } from "utils/template-frontmatter";
 
+/**
+ * The built-in source note (ZotFlow Evo, beta.15): properties for every
+ * field with a value, the annotations as a tagged list under the PDF's
+ * outline, removed ones kept struck through, and a hidden block with what a
+ * restore needs (utils/evo-source-note.ts, `evo` in the scope).
+ */
 const DEFAULT_ITEM_TEMPLATE = `---
-citationKey: {{ item.citationKey | json }}
-title: {{ item.title | json }}
-itemType: {{ item.itemType | json }}
-creators: [{% for c in item.creators %}"{{ c.name }}"{% unless forloop.last %}, {% endunless %}{% endfor %}]
-publication: {{ item.publicationTitle | default: item.publisher | json }}
-date: {{ item.date | json }}
-year: {{ item.year }}
-url: {{ item.url | json }}
-doi: {{ item.DOI | json }}
-tags: [{% for t in item.tags %}"#{{ t.tag | replace: " ", "_" }}"{% unless forloop.last %}, {% endunless %}{% endfor %}]
+{{ evo.yaml }}
 ---
-{%- capture quote_string %}{{ newline }}> {% endcapture -%}
-{%- capture quote_string_2 %}{{ newline }}> >{% endcapture -%}
 # {{ item.title }}
-{%- if item.abstractNote -%}
+
+{{ evo.header }}
+{%- if item.abstractNote %}
+
 ## Abstract
-> {{ item.abstractNote | replace: newline, quote_string }}
 
-{%- endif -%}
-{%- if item.attachments.length > 0 -%}
-## Attachments
-{%- for attachment in item.attachments -%}
-- [{{ attachment.filename }}]({{ attachment | attachment_link }})
-{%- endfor -%}
+{{ item.abstractNote }}
+{%- endif %}
+{%- if item.notes.length > 0 %}
 
-{%- endif -%}
-## Notes
-{%- if item.notes.length > 0 -%}
-{%- for note in item.notes -%}
+# Notes
+{%- for note in item.notes %}
+
 {{ note.note | html2md | wrap_editable: "NOTE", note.key }}
+{%- endfor %}
+{%- endif %}
+{%- if evo.annotations != "" %}
 
-{%- endfor -%}
-{%- endif -%}
-{%- if item.attachments.length > 0 and item.attachmentAnnotations.length > 0 -%}
-## Annotations
-{%- for attachment in item.attachments -%}
-{%- if attachment.annotations.length > 0 -%}
-### {{ attachment.filename }}
-{%- for annotation in attachment.annotations -%}
-> [!zotflow-{{ annotation.type }}-{{ annotation.color }}] [{{ attachment.filename }}, p.{{ annotation.pageLabel }}]({{ annotation | annotation_link }})
-{%- if annotation.type == "ink" or annotation.type == "image"-%}
-> > ![[{{settings.annotationImageFolder}}/{{ annotation.key }}.png]]
-{%- else -%}
-> > {{ annotation.text | replace: newline, quote_string_2 }}
-{%- endif -%}
->
-> {{ annotation.comment | wrap_editable: "ANNO", annotation.key | replace: newline, quote_string }}
-> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
-^{{ annotation.key }}
+{{ evo.annotations }}
+{%- endif %}
 
-{%- endfor -%}
-{%- endif -%}
-{%- endfor -%}
-{%- endif -%}
-{%- if item.attachments.length == 0 and item.itemType == "attachment" and item.annotations.length > 0 -%}
-## Annotations
-{%- for annotation in item.annotations -%}
-> [!zotflow-{{ annotation.type }}-{{ annotation.color }}] [{{ item.title }}, p.{{ annotation.pageLabel }}]({{ annotation | annotation_link }})
-{%- if annotation.type == "ink" or annotation.type == "image"-%}
-> > ![[{{settings.annotationImageFolder}}/{{ annotation.key }}.png]]
-{%- else -%}
-> > {{ annotation.text | replace: newline, quote_string_2 }}
-{%- endif -%}
->
-> {{ annotation.comment | wrap_editable: "ANNO", annotation.key | replace: newline, quote_string }}
-> {% if annotation.tags and annotation.tags.length > 0 -%} {% for t in annotation.tags %}#{{ t.tag | replace: " ", "_" }}{% unless forloop.last %} {% endunless %}{% endfor %} {%- endif %}
-^{{ annotation.key }}
-
-{%- endfor -%}
-{%- endif -%}
+{{ evo.data }}
 `;
 
 const FALLBACK_WIKILINK_TEMPLATE = `{%- if annotations.size > 0 -%}{%- for annotation in annotations -%}
@@ -181,6 +156,8 @@ const CSL_OUTPUT_FORMATS = new Set([
 interface ItemRenderContext {
     item: ItemTemplateContext;
     settings: ZotFlowSettings;
+    /** ZotFlow Evo: the list-format note's parts (a template that uses `evo.`). */
+    evo?: EvoNoteContext;
     __zfReadOnlyKeys: Set<string>;
     __zfZoteroLibPrefix: string;
 }
@@ -208,6 +185,30 @@ const ENGINE_OPTIONS = {
         newline: "\n",
     },
 };
+
+/** ZotFlow Evo: the list-format note's parts in the template's scope. */
+interface EvoNoteContext {
+    /** The properties as YAML lines. */
+    yaml: string;
+    /** Creators, year and the links to the PDF and to Zotero, on one line. */
+    header: string;
+    /** "# Annotations" and what is under it; "" without annotations. */
+    annotations: string;
+    /** The hidden data block. */
+    data: string;
+}
+
+const ZOTERO_FIELD_SET: ReadonlySet<string> = new Set(ZOTERO_FIELDS);
+const CREATOR_ROLES: ReadonlySet<string> = new Set(
+    Object.values(ITEM_TYPE_CREATORS).flat(),
+);
+
+/** Today on this device, YYYY-MM-DD. */
+function localDay(): string {
+    const d = new Date();
+    const two = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+}
 
 export class LibraryTemplateService {
     private engine: Liquid;
@@ -626,6 +627,8 @@ export class LibraryTemplateService {
         templateContent: string | null,
         originalFrontmatter: Record<string, unknown> = {},
         snapshot?: SourceNoteSnapshot,
+        /** ZotFlow Evo: the note as it is (removed annotations and outlines are read from it). */
+        existingText: string | null = null,
     ): Promise<string> {
         try {
             const { text } = await this.renderSourceNote(
@@ -634,6 +637,7 @@ export class LibraryTemplateService {
                 originalFrontmatter,
                 snapshot,
                 false,
+                existingText,
             );
             return text;
         } catch (e) {
@@ -657,6 +661,7 @@ export class LibraryTemplateService {
         originalFrontmatter: Record<string, unknown>,
         snapshot: SourceNoteSnapshot | undefined,
         strict: boolean,
+        existingText: string | null = null,
     ): Promise<{
         text: string;
         frontmatter: Record<string, unknown>;
@@ -665,6 +670,10 @@ export class LibraryTemplateService {
     }> {
         const marks = snapshot ?? (await takeSourceNoteSnapshot(item.libraryID, item.key));
         const context = await this.prepareItemContext(item);
+        // ZotFlow Evo: the list format's parts, only for a template using them.
+        if (template.includes("evo.")) {
+            context.evo = await this.evoNoteContext(item, context, existingText);
+        }
         const { frontmatter, body, bodyLine } = splitFrontmatter(template);
 
         const templateFrontmatter = await renderTemplateFrontmatter({
@@ -697,17 +706,36 @@ export class LibraryTemplateService {
         if (marks.libraryVersion) {
             mandatory["library-version"] = marks.libraryVersion;
         }
+        // ZotFlow Evo: a template writing every field (`evo.yaml`) also drops
+        // the ones the item no longer has, and those of the old default
+        // template; properties of the user's own stay.
+        let kept = originalFrontmatter;
+        if (template.includes("evo.yaml")) {
+            kept = Object.fromEntries(
+                Object.entries(originalFrontmatter).filter(
+                    ([key]) =>
+                        key in templateFrontmatter ||
+                        !isManagedProperty(key, ZOTERO_FIELD_SET, CREATOR_ROLES),
+                ),
+            );
+        }
         const finalFrontmatter = withMandatoryFirst(
             mandatory,
-            mergeTemplateFrontmatter(originalFrontmatter, templateFrontmatter),
+            mergeTemplateFrontmatter(kept, templateFrontmatter),
         );
 
         const frontmatterString =
             await this.parentHost.stringifyYaml(finalFrontmatter);
 
-        const renderedBody = strict
+        let renderedBody = strict
             ? await renderFragment(this.previewEngine, body, context, bodyLine)
             : await this.render(body, context);
+        // ZotFlow Evo: the list format's sections are separated by one empty
+        // line, whatever the template's tags left (Liquid's `-` trims only
+        // spaces here).
+        if (context.evo) {
+            renderedBody = renderedBody.replace(/\n{3,}/g, "\n\n").replace(/\s*$/, "\n");
+        }
 
         return {
             text: `---\n${frontmatterString}---\n${renderedBody}`,
@@ -870,6 +898,155 @@ export class LibraryTemplateService {
     /** The built-in template for `format`, used while its setting is empty. */
     getFallbackCitationTemplate(format: CitationTemplateFormat): string {
         return FALLBACK_CITATION_TEMPLATES[format];
+    }
+
+    /**
+     * ZotFlow Evo: the list-format note's parts (utils/evo-source-note.ts):
+     * its properties, a line with links, "# Annotations" with the outline
+     * and the removed ones, and the data block. The outline of a PDF is read
+     * on the main thread from the file on this device; one read before (the
+     * note's data block, same md5) is used again, and kept while the file
+     * is not here.
+     */
+    private async evoNoteContext(
+        item: AnyIDBZoteroItem,
+        ctx: ItemRenderContext,
+        existingText: string | null,
+    ): Promise<EvoNoteContext> {
+        const previous = parseNoteData(existingText);
+        const attachments: { key: string; title: string; contentType: string; annotations: AnnotationTemplateContext[] }[] =
+            ctx.item.attachments.map((a) => ({
+                key: a.key,
+                title: a.filename || a.title || "File",
+                contentType: a.contentType ?? "",
+                annotations: a.annotations,
+            }));
+        if (item.itemType === "attachment") {
+            const data = item.raw?.data as { filename?: string; contentType?: string } | undefined;
+            attachments.push({
+                key: item.key,
+                title: data?.filename || item.title || "File",
+                contentType: data?.contentType ?? "",
+                annotations: ctx.item.annotations,
+            });
+        }
+        const current: NoteAnnotation[] = [];
+        const markdown = new Map<string, { text: string; comment: string }>();
+        for (const att of attachments) {
+            for (const a of att.annotations) {
+                current.push({
+                    key: a.key,
+                    attachment: att.key,
+                    type: a.type,
+                    color: a.color ?? "",
+                    pageLabel: a.pageLabel ?? "",
+                    sortIndex: a.raw.sortIndex ?? "",
+                    position: a.raw.position,
+                    text: a.raw.text ?? "",
+                    comment: a.raw.comment ?? "",
+                    tags: a.tags.map((t) => t.tag),
+                    dateAdded: a.dateAdded ?? "",
+                    dateModified: a.dateModified ?? "",
+                });
+                markdown.set(a.key, { text: a.text ?? "", comment: a.comment ?? "" });
+            }
+        }
+        const merged = mergeRemoved(previous.annotations, current, localDay());
+        for (const a of merged) {
+            if (markdown.has(a.key)) continue;
+            markdown.set(a.key, {
+                text: this.convertService.annoHtml2md(a.text),
+                comment: this.convertService.annoHtml2md(a.comment),
+            });
+        }
+
+        // The outline of each PDF that has annotations here.
+        const rows = await db.items.bulkGet(
+            attachments.map((a): [number, string] => [item.libraryID, a.key]),
+        );
+        const files: RenderFile[] = [];
+        const outlines: NoteOutline[] = [];
+        for (const [i, att] of attachments.entries()) {
+            const has = merged.some((a) => a.attachment === att.key);
+            let headings: OutlineHeading[] | null = null;
+            if (has && att.contentType === "application/pdf") {
+                const md5 = (rows[i]?.raw?.data as { md5?: string } | undefined)?.md5 ?? "";
+                const before = previous.outlines.find((o) => o.attachment === att.key);
+                if (before && before.md5 === md5) {
+                    headings = before.headings;
+                    outlines.push(before);
+                } else {
+                    const read = await this.parentHost
+                        .evoPdfOutline(item.libraryID, att.key, md5 || undefined)
+                        .catch(() => ({ state: "not-here" as const }));
+                    if (read.state === "ok") {
+                        headings = read.headings;
+                        outlines.push({ attachment: att.key, md5, headings });
+                    } else if (read.state === "none") {
+                        outlines.push({ attachment: att.key, md5, headings: null });
+                    } else if (before) {
+                        headings = before.headings;
+                        outlines.push(before);
+                    }
+                }
+            }
+            files.push({ key: att.key, title: att.title, headings });
+        }
+
+        const imageFolder = this.settings.autoImportAnnotationImages
+            ? this.settings.annotationImageFolder.replace(/\/$/, "")
+            : null;
+        const annotations = renderAnnotations(files, merged, {
+            tagNames: this.settings.evoAnnotationTagNames ?? {},
+            imageFolder,
+            markdown,
+        });
+
+        // The file a double click opens, for the "pdf" link.
+        const kindOf = (r: AnyIDBZoteroItem) => {
+            const d = r.raw?.data as { contentType?: string; linkMode?: string } | undefined;
+            return attachmentKind({ contentType: d?.contentType, linkMode: d?.linkMode });
+        };
+        const present = rows.filter((r): r is AnyIDBZoteroItem => !!r);
+        const target =
+            item.itemType === "attachment"
+                ? item
+                : (choosePrimaryAttachment(present, kindOf).primary ??
+                  choosePrimaryAttachment(present, kindOf).choices[0] ??
+                  null);
+        const pdfLink = target
+            ? `obsidian://zotflow?type=open-attachment&libraryID=${item.libraryID}&key=${target.key}`
+            : "";
+        const zoteroLink = zoteroSelectItemUri(ctx.__zfZoteroLibPrefix, item.key);
+        const properties = noteProperties({
+            data: (item.raw?.data ?? {}) as unknown as Record<string, unknown>,
+            itemType: item.itemType,
+            year: ctx.item.year,
+            // "My Library/Media theory/Kittler" → "Media theory / Kittler"
+            // (the library alone, an item in no collection, is left out).
+            collections: ctx.item.itemPaths
+                .map((path) => path.split("/").slice(1).filter(Boolean).join(" / "))
+                .filter(Boolean),
+            annotationCount: current.length,
+            pdfLink,
+            zoteroLink,
+        });
+        const who = [ctx.item.creatorSummary, ctx.item.year ? `(${ctx.item.year})` : ""]
+            .filter(Boolean)
+            .join(" ");
+        const header = [
+            who,
+            pdfLink ? `[PDF](${pdfLink})` : "",
+            `[Zotero](${zoteroLink})`,
+        ]
+            .filter(Boolean)
+            .join(" · ");
+        return {
+            yaml: propertiesYaml(properties),
+            header,
+            annotations,
+            data: serializeNoteData({ outlines, annotations: merged }),
+        };
     }
 
     private async prepareItemContext(

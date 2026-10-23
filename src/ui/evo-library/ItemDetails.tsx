@@ -6,7 +6,7 @@
  * when long, and below a line the annotations of the file it opens, which
  * scroll on their own too. See FORK.md.
  */
-import { Menu } from "obsidian";
+import { Menu, Platform } from "obsidian";
 import React, {
     useCallback,
     useEffect,
@@ -42,7 +42,7 @@ import { openPersonNote } from "ui/evo-person";
 import { itemOutline } from "ui/evo-library/item-outline";
 import { annotationColors } from "utils/evo-library-model";
 import { interleaveOutline, placementOf } from "utils/evo-outline-list";
-import { notifyLinkedFile, openAttachment } from "utils/viewer";
+import { openAttachment } from "utils/viewer";
 
 import type { App, WorkspaceLeaf } from "obsidian";
 import type { CardAnnotation } from "ui/evo-library/parts";
@@ -260,14 +260,15 @@ export function ItemDetails({
                   cards,
                   outline.headings,
                   (c) => placements.get(c.id) ?? null,
+                  { all: true },
               )
             : cards.map((annotation) => ({ kind: "annotation", annotation }));
-    const linked = details.attachments.filter((a) => a.kind === "linked");
+    // Linked files open in the desktop app (since beta.15); elsewhere the
+    // pane says so.
+    const linked = Platform.isDesktopApp
+        ? []
+        : details.attachments.filter((a) => a.linked);
     const open = (a: EvoAttachmentInfo) => {
-        if (a.kind === "linked") {
-            notifyLinkedFile();
-            return;
-        }
         void openAttachment(details.libraryID, a.key, app);
     };
     return (
@@ -337,9 +338,9 @@ export function ItemDetails({
                                     (a.key === details.primaryKey
                                         ? " is-primary"
                                         : "") +
-                                    (a.kind === "linked" ? " is-linked" : "")
+                                    (a.linked ? " is-linked" : "")
                                 }
-                                title={`${KIND_LABEL[a.kind]}: ${a.title}`}
+                                title={`${a.linked ? "Linked file" : KIND_LABEL[a.kind]}: ${a.title}`}
                                 onClick={() => open(a)}
                                 onContextMenu={(e) => {
                                     e.preventDefault();
@@ -352,7 +353,11 @@ export function ItemDetails({
                                 }}
                             >
                                 <Icon
-                                    name={KIND_ICON[a.kind] ?? "file"}
+                                    name={
+                                        a.linked
+                                            ? "file-symlink"
+                                            : (KIND_ICON[a.kind] ?? "file")
+                                    }
                                     fallback="file"
                                 />
                                 <span className="zotflow-evo-details-file-name">
@@ -381,10 +386,10 @@ export function ItemDetails({
                         <Icon name="alert-triangle" />
                         <span>
                             {linked.length === details.attachments.length
-                                ? "A linked file: "
-                                : `Linked file${linked.length > 1 ? "s" : ""} (${linked.map((a) => a.title).join(", ")}): `}
-                            stored outside Zotero&rsquo;s storage, so ZotFlow
-                            can&rsquo;t open it yet. Open it in Zotero.
+                                ? "A linked file"
+                                : `Linked file${linked.length > 1 ? "s" : ""} (${linked.map((a) => a.title).join(", ")})`}
+                            , stored on a computer outside Zotero: it opens in
+                            Obsidian&rsquo;s desktop app only.
                         </span>
                     </div>
                 )}
@@ -491,7 +496,7 @@ export function ItemDetails({
                                 key={`h${i}`}
                                 className="zotflow-evo-details-heading"
                                 data-level={Math.min(entry.heading.level, 4)}
-                                title={`Open at this page (${entry.heading.page + 1})`}
+                                title="Open the PDF at this page"
                                 onClick={() => {
                                     if (!outlinePdf) return;
                                     void openAttachment(
@@ -504,7 +509,12 @@ export function ItemDetails({
                                     );
                                 }}
                             >
-                                {entry.heading.title}
+                                <span className="zotflow-evo-details-heading-title">
+                                    {entry.heading.title}
+                                </span>
+                                <span className="zotflow-evo-details-heading-page">
+                                    {entry.heading.label ?? entry.heading.page + 1}
+                                </span>
                             </div>
                         ) : (
                             <AnnotationCard

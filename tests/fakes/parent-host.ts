@@ -230,6 +230,8 @@ export function createFakeParentHost(
         readExternalBinaryFile: async () =>
             unsupported("readExternalBinaryFile"),
         statExternalFile: async () => unsupported("statExternalFile"),
+        listExternalFolder: async () => unsupported("listExternalFolder"),
+        evoPdfOutline: async () => ({ state: "not-here" as const }),
         openFile: async (path) => {
             opened.push(path);
         },

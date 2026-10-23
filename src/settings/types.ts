@@ -1,3 +1,4 @@
+import type { SharedFolderConfig } from "utils/evo-shared-folder";
 import {
     DEFAULT_ANNOTATION_LAYOUT,
     DEFAULT_ATTACH_FILENAME,
@@ -188,6 +189,10 @@ export interface ZotFlowSettings {
     readerSelectionToolToggle: boolean;
     /** ZotFlow Evo: the item pane shows the PDF's outline among its annotations. */
     evoItemPaneOutline: boolean;
+    /** ZotFlow Evo: group libraries whose files are in a shared folder (utils/evo-shared-folder.ts); passwords in SecretStorage. */
+    evoGroupFolders: SharedFolderConfig[];
+    /** ZotFlow Evo: the tag each annotation colour gets in source notes (by colour hex, without "#"). */
+    evoAnnotationTagNames: Record<string, string>;
     /** ZotFlow Evo: the languages OCR reads (Tesseract codes), as last chosen in the PDF editing menu. */
     evoOcrLanguages: string[];
     /** CSL renderer: default style id (slug or custom style key). */
@@ -339,6 +344,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     readerNoteStripSpacing: 12,
     readerSelectionToolToggle: false,
     evoItemPaneOutline: false,
+    evoGroupFolders: [],
+    evoAnnotationTagNames: {},
     cslDefaultStyleId: "apa",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",

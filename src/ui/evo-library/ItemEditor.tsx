@@ -8,7 +8,9 @@
  * (`AbstractEditor`), shown here in the strip.
  *
  * Fields are written as local edits (they sync like any other); a new item
- * type goes to Zotero first (item-edits.ts). Creators are not edited here.
+ * type goes to Zotero first (item-edits.ts). Creators are one field each,
+ * read with the name rules in utils/evo-names.ts; the citation key has a
+ * button that makes it again from the data (utils/evo-citekey.ts).
  * The styles are injected into the document the editor is in, so it looks
  * the same inside the reader's frames.
  */
@@ -25,7 +27,8 @@ import { services } from "services/services";
 import { noteLocalEdit } from "services/evo-auto-sync";
 import { previewTypeChange, setItemType } from "ui/evo-library/item-edits";
 import { useLibraryChanges } from "ui/evo-library/parts";
-import { ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
+import { ITEM_TYPE_CREATORS, ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
+import { editableName, parseCreatorName } from "utils/evo-names";
 import { ITEM_TYPE_LABELS, itemTypeLabel } from "types/zotero-item-type-labels";
 
 /** Names of fields as the editor shows them (others: their name, spaced). */
@@ -104,6 +107,17 @@ textarea.zotflow-evo-editor-input { resize: vertical; min-height: 44px; }
 .zotflow-evo-editor-confirm { grid-column: 1 / -1; padding: 6px 8px; border-radius: 4px; background: var(--background-modifier-hover, rgba(128,128,128,.12)); font-size: var(--font-ui-smaller, 12px); line-height: 1.45; }
 .zotflow-evo-editor-confirm button { margin: 6px 6px 0 0; }
 .zotflow-evo-editor-saving { opacity: .55; }
+.zotflow-evo-editor-row select.zotflow-evo-editor-role { padding: 3px 2px; color: var(--text-muted, #666); font-size: var(--font-ui-smaller, 12px); text-align: end; text-align-last: end; }
+.zotflow-evo-editor-with-tool { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.zotflow-evo-editor-with-tool > input { flex: 1 1 auto; }
+.zotflow-evo-editor-tool { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; box-shadow: none; color: var(--text-faint, #999); cursor: pointer; opacity: .6; transition: opacity 120ms ease-out, color 120ms ease-out; }
+.zotflow-evo-editor-row:hover .zotflow-evo-editor-tool, .zotflow-evo-editor-tool:focus-visible { opacity: 1; }
+.zotflow-evo-editor-tool:hover { color: var(--text-normal, #222); background: var(--background-modifier-hover, rgba(128,128,128,.12)); }
+.zotflow-evo-editor-tool svg { width: 14px; height: 14px; }
+.zotflow-evo-editor-tool.is-busy svg { animation: zotflow-evo-spin 700ms linear infinite; }
+@keyframes zotflow-evo-spin { to { transform: rotate(360deg); } }
+.zotflow-evo-editor-add-creator { justify-self: start; padding: 2px 6px; border: 0; background: transparent; box-shadow: none; color: var(--text-faint, #999); font-size: var(--font-ui-smaller, 12px); cursor: pointer; }
+.zotflow-evo-editor-add-creator:hover { color: var(--text-normal, #222); }
 `;
 
 /** The documents the styles were given to. */
@@ -121,9 +135,18 @@ function ensureStyles(doc: Document) {
     styled.add(doc);
 }
 
+/** A creator as Zotero keeps it. */
+interface Creator {
+    creatorType: string;
+    firstName?: string;
+    lastName?: string;
+    name?: string;
+}
+
 interface ItemData {
     itemType: string;
     fields: Record<string, string>;
+    creators: Creator[];
 }
 
 async function readItem(
@@ -148,7 +171,12 @@ async function readItem(
         const v = data[name];
         if (typeof v === "string" && v !== "") fields[name] = v;
     }
-    return { itemType, fields };
+    const creators = Array.isArray(data.creators)
+        ? (data.creators as Creator[]).filter(
+              (c) => c && typeof c.creatorType === "string",
+          )
+        : [];
+    return { itemType, fields, creators };
 }
 
 /** The item's data, read again whenever the library changes. */
@@ -194,6 +222,77 @@ async function saveField(
             `Couldn't save ${fieldLabel(field)}. ${e instanceof Error ? e.message : ""}`,
         );
     }
+}
+
+async function saveCreators(
+    libraryID: number,
+    key: string,
+    creators: Creator[],
+): Promise<void> {
+    try {
+        const changed = await workerBridge.evoLibrary.setItemCreators(
+            libraryID,
+            key,
+            creators,
+        );
+        if (changed) noteLocalEdit(libraryID);
+    } catch (e) {
+        services.logService.error("Failed to save the creators", "EvoLibrary", e);
+        services.notificationService.notify(
+            "error",
+            `Couldn't save the creators. ${e instanceof Error ? e.message : ""}`,
+        );
+    }
+}
+
+/** A creator's name for the name rules. */
+const nameOf = (c: Creator) =>
+    c.name !== undefined
+        ? { name: c.name }
+        : { firstName: c.firstName ?? "", lastName: c.lastName ?? "" };
+
+/** A role's name: "bookAuthor" → "Book author". */
+function roleLabel(type: string): string {
+    const spaced = type.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Lucide's refresh-cw, drawn here (the reader's frames have no icon helper). */
+function RefreshIcon() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+        </svg>
+    );
+}
+
+/** Lucide's x. */
+function RemoveIcon() {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+        </svg>
+    );
 }
 
 /** A field's input: saved when left or on Enter; Escape takes the change back. */
@@ -307,9 +406,13 @@ export function ItemEditor({
         dropped: { field: string; value: string }[];
     } | null>(null);
     const [saving, setSaving] = useState(false);
+    // A creator row added with "+" and not named yet.
+    const [newCreator, setNewCreator] = useState<string | null>(null);
+    const [keyBusy, setKeyBusy] = useState(false);
     useEffect(() => {
         setAdded([]);
         setConfirm(null);
+        setNewCreator(null);
     }, [libraryID, itemKey]);
 
     const allowed = useMemo(
@@ -356,6 +459,43 @@ export function ItemEditor({
         void saveField(libraryID, itemKey, field, value);
     };
 
+    const roles = ITEM_TYPE_CREATORS[data.itemType] ?? ["author"];
+    const creators = data.creators;
+    const writeCreators = (next: Creator[]) =>
+        void saveCreators(libraryID, itemKey, next).then(reload);
+    const renameCreator = (index: number) => (text: string) => {
+        const old = creators[index];
+        if (!old) return;
+        const parsed = parseCreatorName(text, {
+            singleField: old.name !== undefined,
+        });
+        const next = [...creators];
+        if (!parsed) next.splice(index, 1);
+        else next[index] = { creatorType: old.creatorType, ...parsed };
+        writeCreators(next);
+    };
+    const addCreator = (text: string) => {
+        const type = newCreator ?? roles[0] ?? "author";
+        setNewCreator(null);
+        const parsed = parseCreatorName(text);
+        if (parsed) writeCreators([...creators, { creatorType: type, ...parsed }]);
+    };
+    const regenerateKey = async () => {
+        setKeyBusy(true);
+        try {
+            const key = await workerBridge.evoLibrary.suggestCitationKey(
+                libraryID,
+                itemKey,
+            );
+            if (key && key !== (data.fields.citationKey ?? "")) {
+                await saveField(libraryID, itemKey, "citationKey", key);
+                reload();
+            }
+        } finally {
+            setKeyBusy(false);
+        }
+    };
+
     return (
         <div
             ref={ref}
@@ -379,12 +519,38 @@ export function ItemEditor({
                     <span className="zotflow-evo-editor-label">
                         Citation key
                     </span>
-                    <FieldInput
-                        key={`${itemKey}:citationKey`}
-                        value={data.fields.citationKey ?? ""}
-                        placeholder="—"
-                        onCommit={commit("citationKey")}
-                    />
+                    <span className="zotflow-evo-editor-with-tool">
+                        <FieldInput
+                            key={`${itemKey}:citationKey`}
+                            value={data.fields.citationKey ?? ""}
+                            placeholder="—"
+                            onCommit={commit("citationKey")}
+                        />
+                        <button
+                            type="button"
+                            className={
+                                "zotflow-evo-editor-tool zotflow-evo-editor-rekey" +
+                                (keyBusy ? " is-busy" : "")
+                            }
+                            title="Make the citation key again from the creators, title and year"
+                            aria-label="Make the citation key again"
+                            disabled={keyBusy}
+                            // Before the click: a field being typed in is saved on blur first.
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                                const active = ref.current?.ownerDocument
+                                    .activeElement as HTMLElement | null;
+                                active?.blur();
+                                // After the blur's save has gone out.
+                                window.setTimeout(
+                                    () => void regenerateKey(),
+                                    60,
+                                );
+                            }}
+                        >
+                            <RefreshIcon />
+                        </button>
+                    </span>
                 </div>
             )}
             <div className="zotflow-evo-editor-row">
@@ -429,6 +595,85 @@ export function ItemEditor({
                     </div>
                 )}
             </div>
+            {creators.map((c, i) => (
+                <div
+                    key={`${itemKey}:creator:${i}:${editableName(nameOf(c))}`}
+                    className="zotflow-evo-editor-row zotflow-evo-editor-creator"
+                >
+                    <select
+                        className="zotflow-evo-editor-role"
+                        value={c.creatorType}
+                        aria-label="Role"
+                        onChange={(e) => {
+                            const next = [...creators];
+                            next[i] = { ...c, creatorType: e.target.value };
+                            writeCreators(next);
+                        }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                    >
+                        {(roles.includes(c.creatorType)
+                            ? roles
+                            : [c.creatorType, ...roles]
+                        ).map((r) => (
+                            <option key={r} value={r}>
+                                {roleLabel(r)}
+                            </option>
+                        ))}
+                    </select>
+                    <span className="zotflow-evo-editor-with-tool">
+                        <FieldInput
+                            value={editableName(nameOf(c))}
+                            placeholder="First Last"
+                            onCommit={renameCreator(i)}
+                        />
+                        <button
+                            type="button"
+                            className="zotflow-evo-editor-tool"
+                            title="Remove"
+                            aria-label="Remove this creator"
+                            onClick={() =>
+                                writeCreators(creators.filter((_, j) => j !== i))
+                            }
+                        >
+                            <RemoveIcon />
+                        </button>
+                    </span>
+                </div>
+            ))}
+            {newCreator !== null ? (
+                <div className="zotflow-evo-editor-row zotflow-evo-editor-creator">
+                    <select
+                        className="zotflow-evo-editor-role"
+                        value={newCreator}
+                        aria-label="Role"
+                        onChange={(e) => setNewCreator(e.target.value)}
+                        onKeyDown={(e) => e.stopPropagation()}
+                    >
+                        {roles.map((r) => (
+                            <option key={r} value={r}>
+                                {roleLabel(r)}
+                            </option>
+                        ))}
+                    </select>
+                    <FieldInput
+                        value=""
+                        autoFocus
+                        placeholder="First Last, or Last, First"
+                        onCommit={addCreator}
+                    />
+                </div>
+            ) : (
+                <div className="zotflow-evo-editor-row">
+                    <span />
+                    <button
+                        type="button"
+                        className="zotflow-evo-editor-add-creator"
+                        onClick={() => setNewCreator(roles[0] ?? "author")}
+                    >
+                        + Add a creator
+                    </button>
+                </div>
+            )}
             {shown.map((field) => (
                 <div
                     key={`${itemKey}:${field}`}

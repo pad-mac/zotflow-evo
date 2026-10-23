@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import {
     attachmentKind,
+    isLinkedFile,
     bestKind,
-    choosePrimaryAttachment,
     embeddedUrls,
     filterRows,
     md5FromUrl,
@@ -82,20 +82,17 @@ describe("titles with markup", () => {
 });
 
 describe("linked files", () => {
-    it("are their own kind: shown, never opened", () => {
+    it("since beta.15 are their content's kind, and open (on desktop)", () => {
         const linked = attachmentKind({
             contentType: "application/pdf",
             linkMode: "linked_file",
         });
-        expect(linked).toBe("linked");
+        expect(linked).toBe("pdf");
+        expect(isLinkedFile({ linkMode: "linked_file" })).toBe(true);
+        expect(isLinkedFile({ linkMode: "imported_file" })).toBe(false);
+        // The kind given before still sorts below what opens.
         expect(bestKind(["link", "linked"])).toBe("linked");
         expect(bestKind(["linked", "pdf"])).toBe("pdf");
-        const { primary, choices } = choosePrimaryAttachment(
-            [{ k: "linked" as const }],
-            (a) => a.k,
-        );
-        expect(primary).toBeNull();
-        expect(choices).toEqual([]);
     });
 });
 

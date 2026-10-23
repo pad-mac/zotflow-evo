@@ -62,7 +62,7 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 name: "Sync",
                 items: [
                     ...this.syncSection.getDefinitions(),
-                    ...pick("Automatic sync"),
+                    ...pick("Automatic sync", "Group shared folders"),
                 ],
             },
             {
@@ -76,7 +76,11 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 desc: "Templates, paths, editable regions, annotation assets; links to source notes; dragging into notes.",
                 items: [
                     ...(page("Source Notes")?.items ?? []),
-                    ...pick("Links to source notes", "Dragging into notes"),
+                    ...pick(
+                        "Links to source notes",
+                        "Annotation tags in source notes",
+                        "Dragging into notes",
+                    ),
                     ...dropTables,
                 ],
             },

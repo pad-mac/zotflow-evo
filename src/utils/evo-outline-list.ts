@@ -4,7 +4,9 @@
  * or below where it points (its page, and on the page its height when the
  * outline gives one). Only headings with annotations in their part are
  * shown — the part runs to the next heading of the same or a higher level —
- * so the list stays the annotations, ordered under their chapters.
+ * so the list stays the annotations, ordered under their chapters — or,
+ * with `all` (the item pane), every heading, those without annotations
+ * and those after the last one too.
  */
 
 /** One outline entry and where it points. */
@@ -16,6 +18,8 @@ export interface OutlineHeading {
     page: number;
     /** Its height on the page in PDF points (from the bottom), when the outline gives it. */
     top: number | null;
+    /** The page's label as the PDF shows it ("iv", "245"), if it has labels. */
+    label?: string;
 }
 
 /** Where an annotation is, the same way. */
@@ -66,6 +70,7 @@ export function interleaveOutline<T>(
     annotations: T[],
     headings: OutlineHeading[],
     placeOf: (a: T) => Placement | null,
+    opts: { all?: boolean } = {},
 ): OutlineListEntry<T>[] {
     // In the order of the pages (an outline may jump back), stable.
     const sorted = headings
@@ -87,6 +92,11 @@ export function interleaveOutline<T>(
             if (next > 0) used.add(next - 1);
         }
         placed.push({ index: -1, entry: { kind: "annotation", annotation } });
+    }
+    if (opts.all) {
+        for (; next < sorted.length; next++)
+            placed.push({ index: next, entry: { kind: "heading", heading: sorted[next]! } });
+        return placed.map((p) => p.entry);
     }
     // A heading is shown when its part has annotations: itself, or a
     // heading after it, before one of its level or higher, has.

@@ -294,27 +294,10 @@ export class AnnotationService {
             "AnnotationService",
         );
 
-        // Remove rendered images.
-        const foundKeys = new Set(items.map((i) => i.key));
-        const deleteImage = (key: string) =>
-            this.noteService.deleteAnnotationImage(key).catch((e) => {
-                this.parentHost.log(
-                    "error",
-                    `Failed to delete annotation image for ${key}`,
-                    "AnnotationService",
-                    e,
-                );
-            });
-
-        for (const existing of items) {
-            const isVisual =
-                existing.raw.data.annotationType === "image" ||
-                existing.raw.data.annotationType === "ink";
-            if (isVisual) void deleteImage(existing.key);
-        }
-        for (const id of ids) {
-            if (!foundKeys.has(id)) void deleteImage(id);
-        }
+        // ZotFlow Evo (beta.15): rendered images are kept. The source note
+        // keeps a removed annotation, struck through, and its image with it
+        // (utils/evo-source-note.ts); `noteService.deleteAnnotationImage` is
+        // no longer called from here.
 
         // Annotations are hard-deleted: the row goes now, the delete log
         // carries the DELETE to Zotero.

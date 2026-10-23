@@ -14,6 +14,16 @@ export async function deleteRemovedItemFiles(
     rows: AnyIDBZoteroItem[],
     context: string,
 ): Promise<void> {
+    // ZotFlow Evo (beta.15): kept. A source note keeps a removed annotation
+    // (struck through) as a lasting copy, and its image with it.
+    const images = rows.filter(hasAnnotationImage).length;
+    if (images)
+        parentHost.log(
+            "debug",
+            `Kept the images of ${images} removed annotation(s) for the source notes`,
+            context,
+        );
+    if (KEEP_REMOVED_IMAGES) return;
     const folder = annotationImageFolder.replace(/\/$/, "");
     for (const row of rows) {
         if (!hasAnnotationImage(row)) continue;
@@ -30,6 +40,9 @@ export async function deleteRemovedItemFiles(
         }
     }
 }
+
+/** ZotFlow Evo: the source notes keep removed annotations, so their images stay. */
+const KEEP_REMOVED_IMAGES = true;
 
 function hasAnnotationImage(row: AnyIDBZoteroItem): boolean {
     return row.itemType === "annotation" && ["image", "ink"].includes(String(row.raw?.data?.annotationType));

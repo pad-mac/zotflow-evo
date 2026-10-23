@@ -23,7 +23,14 @@ const LEGACY_IDS: Partial<Record<CredentialKey, string[]>> = {
 };
 
 /** Minimal shape: settings object must have the credential keys as optional strings. */
-type HasCredentials = { [K in CredentialKey]?: string };
+type HasCredentials = { [K in CredentialKey]?: string } & {
+    /** ZotFlow Evo: shared folders of groups, each with its WebDAV password. */
+    evoGroupFolders?: { id?: string; password?: string }[];
+};
+
+/** ZotFlow Evo: the ID a shared folder's WebDAV password is kept under. */
+const folderSecretId = (id: string) => `evo-folder-${id}`;
+const FOLDER_ID = /^[a-z0-9]+$/;
 
 function readSecret(storage: SecretStorage, id: string): string | null {
     try {
@@ -57,6 +64,25 @@ export function saveCredentials<T extends HasCredentials>(
             // Remove stale secret if field was cleared
             writeSecret(storage, SECRET_ID[key], "");
         }
+    }
+    // ZotFlow Evo: each shared folder's password; those of folders no
+    // longer set up are cleared.
+    const kept = new Set<string>();
+    for (const folder of settings.evoGroupFolders ?? []) {
+        if (!folder.id || !FOLDER_ID.test(folder.id)) continue;
+        const id = folderSecretId(folder.id);
+        kept.add(id);
+        writeSecret(storage, id, folder.password ?? "");
+    }
+    let listed: string[] = [];
+    try {
+        listed = storage.listSecrets();
+    } catch {
+        listed = [];
+    }
+    for (const id of listed) {
+        if (id.startsWith("evo-folder-") && !kept.has(id) && readSecret(storage, id))
+            writeSecret(storage, id, "");
     }
 }
 
@@ -97,6 +123,13 @@ export function loadCredentials<T extends HasCredentials>(
             settings[key] = storedValue;
         }
     }
+    for (const folder of settings.evoGroupFolders ?? []) {
+        if (!folder.id || !FOLDER_ID.test(folder.id)) continue;
+        const stored = readSecret(storage, folderSecretId(folder.id));
+        if (folder.password) {
+            if (!stored) writeSecret(storage, folderSecretId(folder.id), folder.password);
+        } else if (stored) folder.password = stored;
+    }
 }
 
 /**
@@ -107,6 +140,12 @@ export function stripCredentials<T extends HasCredentials>(settings: T): T {
     const copy = { ...settings };
     for (const key of CREDENTIAL_KEYS) {
         delete copy[key];
+    }
+    if (Array.isArray(copy.evoGroupFolders)) {
+        copy.evoGroupFolders = copy.evoGroupFolders.map((folder) => {
+            const { password: _password, ...rest } = folder;
+            return rest;
+        });
     }
     return copy;
 }

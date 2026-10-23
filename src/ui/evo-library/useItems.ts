@@ -254,6 +254,8 @@ interface PendingEdit {
     libraryID: number;
     collectionKey: string | null;
     keys: string[];
+    /** The rows' libraries (a person's items come from several). */
+    libraries: number[];
     /** The row the question is shown at. */
     anchor: string;
 }
@@ -291,6 +293,7 @@ export function useRowEditing(
                 libraryID: now.libraryID,
                 collectionKey: now.collectionKey,
                 keys: current.selectedRows.map((r) => r.key),
+                libraries: current.selectedRows.map((r) => r.libraryID),
                 anchor,
             });
             bodyRef.current?.focus();
@@ -303,7 +306,15 @@ export function useRowEditing(
         setPending(null);
         bodyRef.current?.focus();
         if (!edit) return;
-        if (edit.kind === "trash") void trashItems(edit.libraryID, edit.keys);
+        if (edit.kind === "trash") {
+            // By library: the rows of a person's table may come from several.
+            const byLibrary = new Map<number, string[]>();
+            edit.keys.forEach((key, i) => {
+                const lib = edit.libraries[i] ?? edit.libraryID;
+                byLibrary.set(lib, [...(byLibrary.get(lib) ?? []), key]);
+            });
+            for (const [lib, keys] of byLibrary) void trashItems(lib, keys);
+        }
         else if (edit.collectionKey)
             void removeItemsFromCollection(
                 edit.libraryID,

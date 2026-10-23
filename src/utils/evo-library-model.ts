@@ -13,9 +13,10 @@ import { itemTypeLabel } from "types/zotero-item-type-labels";
 /* ------------------------------------------------------------------ */
 
 /**
- * What an attachment is, as far as opening it goes. "linked": a file that
- * lives outside Zotero's storage (a linked file), which ZotFlow does not
- * open; "link": a link to a web page.
+ * What an attachment is, as far as opening it goes: by its content type,
+ * a linked file (outside Zotero's storage) too since beta.15 (it opens on
+ * desktop, see `isLinkedFile()`); "link": a link to a web page. "linked"
+ * is no longer given (kept for the table's older column state).
  */
 export type AttachmentKind =
     "pdf" | "epub" | "snapshot" | "linked" | "link" | "other";
@@ -29,8 +30,6 @@ export interface AttachmentFacts {
 export function attachmentKind(data: AttachmentFacts): AttachmentKind {
     // A link to a web page (Google Books, say) is never something to open.
     if (data.linkMode === "linked_url") return "link";
-    // Nor, for now, a file outside Zotero's storage.
-    if (data.linkMode === "linked_file") return "linked";
     switch (data.contentType) {
         case "application/pdf":
             return "pdf";
@@ -41,6 +40,11 @@ export function attachmentKind(data: AttachmentFacts): AttachmentKind {
         default:
             return "other";
     }
+}
+
+/** A file outside Zotero's storage (it opens in the desktop app only). */
+export function isLinkedFile(data: AttachmentFacts): boolean {
+    return data.linkMode === "linked_file";
 }
 
 /** Kinds the reader opens, best first. */

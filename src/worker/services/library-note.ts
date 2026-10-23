@@ -640,6 +640,7 @@ export class LibraryNoteService {
                 templateContent,
                 fileCheck.frontmatter || {},
                 snapshot,
+                oldContent,
             );
 
             const spliced = reinsertPersistRegions(content, extracted);

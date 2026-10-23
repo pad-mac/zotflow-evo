@@ -858,15 +858,17 @@ describe("deleteAnnotations", () => {
         expect((await db.syncDeleteLog.toArray()).map((l) => l.key)).toEqual(["SYNCED01"]);
     });
 
+    // ZotFlow Evo (beta.15): rendered images are kept — the source note
+    // keeps a removed annotation, struck through, with its image.
     it.each(["image", "ink"] as const)(
-        "removes the rendered image for a %s annotation",
+        "keeps the rendered image of a %s annotation",
         async (type) => {
             const attachment = await h.seedAttachment("ATTACH01");
             await h.seedAnnotation("VISUAL01", "ATTACH01", { type });
 
             await h.service.deleteAnnotations(attachment, ["VISUAL01"]);
 
-            expect(h.noteService.deletedImages).toContain("VISUAL01");
+            expect(h.noteService.deletedImages).toEqual([]);
         },
     );
 
@@ -877,34 +879,6 @@ describe("deleteAnnotations", () => {
         await h.service.deleteAnnotations(attachment, ["ANNO0001"]);
 
         expect(h.noteService.deletedImages).toEqual([]);
-    });
-
-    it("still removes the image of an id that is no longer in the DB", async () => {
-        // The row may already be gone while its rendered PNG is not — without
-        // this the file would be orphaned in the vault forever.
-        const attachment = await h.seedAttachment("ATTACH01");
-
-        await h.service.deleteAnnotations(attachment, ["MISSING1"]);
-
-        expect(h.noteService.deletedImages).toEqual(["MISSING1"]);
-    });
-
-    it("ignores an image-delete failure", async () => {
-        const attachment = await h.seedAttachment("ATTACH01");
-        await h.seedAnnotation("VISUAL01", "ATTACH01", { type: "image" });
-        h.noteService.failDeleteImage = true;
-
-        await expect(
-            h.service.deleteAnnotations(attachment, ["VISUAL01"]),
-        ).resolves.toBeUndefined();
-
-        await vi.waitFor(() => {
-            expect(
-                h.host.logsAt("error").some((l) =>
-                    l.message.includes("Failed to delete annotation image"),
-                ),
-            ).toBe(true);
-        });
     });
 
     it("asks for a note update even when no row matched", async () => {

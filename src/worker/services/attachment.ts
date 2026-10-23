@@ -6,6 +6,17 @@ import { proxiedFetch } from "worker/proxied-fetch";
 import { WebDavService } from "./webdav";
 import { ZoteroAPIService } from "./zotero";
 import { ZotFlowError, ZotFlowErrorCode } from "utils/error";
+import {
+    PROPFIND_BODY,
+    basicAuth,
+    isValidSharedFilename,
+    nameVariants,
+    parseMultistatus,
+    sharedFolderFor,
+    webdavFolderURL,
+} from "utils/evo-shared-folder";
+
+import type { SharedFolderConfig } from "utils/evo-shared-folder";
 
 import type { ZotFlowSettings } from "settings/types";
 import type { AttachmentData } from "types/zotero-item";
@@ -147,6 +158,8 @@ export class AttachmentService {
         const linkMode = item.raw.data.linkMode;
         const edited = await this.editedCopy(item);
         if (edited) return edited.buffer;
+        const shared = this.sharedFolderOf(item);
+        if (shared) return this.readSharedFile(item, shared, false);
         try {
             const external = await this.resolveReaderExternalFilePath(item);
             if (external) {
@@ -160,6 +173,152 @@ export class AttachmentService {
         if (!cached) return null;
         const md5 = item.raw.data.md5;
         return !md5 || cached.md5 === md5 ? cached.buffer : null;
+    }
+
+    /**
+     * ZotFlow Evo: the shared folder an attachment's file is in (a group
+     * set up under Sync, "Group shared folders"), for stored files only.
+     */
+    private sharedFolderOf(
+        item: IDBZoteroItem<AttachmentData>,
+    ): SharedFolderConfig | null {
+        const linkMode = item.raw.data.linkMode;
+        if (linkMode !== "imported_file" && linkMode !== "imported_url")
+            return null;
+        return sharedFolderFor(this.settings.evoGroupFolders, item.libraryID);
+    }
+
+    /**
+     * ZotFlow Evo: a file of a shared folder: Zotero's own storage folder
+     * first (the Zotero plugin keeps its WebDAV downloads there), then the
+     * folder on this computer (both Unicode forms of the name), or for
+     * WebDAV the copy kept here, then — with `download` — the server (kept
+     * in the cache afterwards). Null when it is not found.
+     */
+    private async readSharedFile(
+        item: IDBZoteroItem<AttachmentData>,
+        config: SharedFolderConfig,
+        download: boolean,
+    ): Promise<ArrayBuffer | null> {
+        const name = item.raw.data.filename;
+        if (!isValidSharedFilename(name)) return null;
+        const desktop = await this.parentHost.isDesktopApp();
+        const storagePath = this.settings.zoteroStoragePath.trim();
+        if (desktop && storagePath) {
+            try {
+                const path = await this.resolveLocalStorageFilePath(item, storagePath);
+                return await this.parentHost.readExternalBinaryFile(path);
+            } catch {
+                // Not there: the shared folder.
+            }
+        }
+        if (config.mode === "folder") {
+            if (!desktop) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.RESOURCE_MISSING,
+                    "AttachmentService",
+                    "This group's files are in a folder on a computer; set up WebDAV for it to open them here.",
+                );
+            }
+            for (const variant of nameVariants(name)) {
+                try {
+                    const path = await this.parentHost.joinPath(config.folder.trim(), variant);
+                    return await this.parentHost.readExternalBinaryFile(path);
+                } catch {
+                    // The other form of the name, or not there.
+                }
+            }
+            return null;
+        }
+        const cached = await db.files.get([item.libraryID, item.key]);
+        if (cached && cached.fileName === name) return cached.buffer;
+        if (!download) return null;
+        const url = webdavFolderURL(config);
+        if (!url) return null;
+        if (!config.webdavUser || !config.password) {
+            throw new ZotFlowError(
+                ZotFlowErrorCode.CONFIG_MISSING,
+                "AttachmentService",
+                "The WebDAV user name or password of this group's shared folder is not set (Settings, Sync, Group shared folders).",
+            );
+        }
+        const auth = basicAuth(config.webdavUser, config.password);
+        for (const variant of nameVariants(name)) {
+            const response = await this.parentHost.request({
+                url: url + encodeURIComponent(variant),
+                method: "GET",
+                headers: { Authorization: auth },
+                throw: false,
+            });
+            if (response.status === 401 || response.status === 403) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.AUTH_INVALID,
+                    "AttachmentService",
+                    "The WebDAV server refused the user name or password of this group's shared folder.",
+                );
+            }
+            if (response.status === 404) continue;
+            if (response.status >= 300) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.NETWORK_ERROR,
+                    "AttachmentService",
+                    `The WebDAV server answered ${response.status} for "${variant}".`,
+                );
+            }
+            const buffer = response.arrayBuffer;
+            const md5 = SparkMD5.ArrayBuffer.hash(buffer);
+            await db.files.put({
+                libraryID: item.libraryID,
+                key: item.key,
+                buffer,
+                md5,
+                fileName: name,
+                mimeType: item.raw.data.contentType || "application/pdf",
+                size: buffer.byteLength,
+                lastAccessedAt: new Date().toISOString(),
+            });
+            void this.pruneCache().catch(() => {
+                // Best effort.
+            });
+            return buffer;
+        }
+        return null;
+    }
+
+    /**
+     * ZotFlow Evo: a shared folder's files (WebDAV listing, or the folder on
+     * this computer), for the settings' test.
+     */
+    async listSharedFolder(
+        config: SharedFolderConfig,
+    ): Promise<{ name: string; size: number | null }[]> {
+        if (config.mode === "folder") {
+            return (await this.parentHost.listExternalFolder(config.folder.trim())).map(
+                (name) => ({ name, size: null }),
+            );
+        }
+        const url = webdavFolderURL(config);
+        if (!url) throw new Error("The WebDAV address is not complete.");
+        const response = await this.parentHost.request({
+            url,
+            method: "PROPFIND",
+            headers: {
+                Authorization: basicAuth(config.webdavUser, config.password ?? ""),
+                Depth: "1",
+                "Content-Type": "application/xml; charset=utf-8",
+            },
+            body: PROPFIND_BODY,
+            throw: false,
+        });
+        if (response.status === 401 || response.status === 403)
+            throw new Error("The server refused the user name or password.");
+        if (response.status === 404) throw new Error("The folder is not on the server.");
+        if (response.status !== 207)
+            throw new Error(`The server answered ${response.status}.`);
+        const xml = new TextDecoder().decode(response.arrayBuffer);
+        return parseMultistatus(xml, url)
+            .filter((e) => !e.isDir)
+            .map((e) => ({ name: e.name, size: e.size }));
     }
 
     /** ZotFlow Evo: the rewritten copy of an item, if it is the item's current file. */
@@ -194,6 +353,8 @@ export class AttachmentService {
 
         // ZotFlow Evo: a rewritten copy kept here is the file (see putEditedFile()).
         if (await this.editedCopy(item)) return { kind: "library" };
+        // ZotFlow Evo: a group's shared folder (its files are named once, never replaced).
+        if (this.sharedFolderOf(item)) return { kind: "library" };
 
         let filePath: string | null;
         try {
@@ -278,6 +439,22 @@ export class AttachmentService {
         const edited = await this.editedCopy(item);
         if (edited) {
             return new Blob([edited.buffer], { type: edited.mimeType });
+        }
+        // ZotFlow Evo: a group whose files are in a shared folder (a folder
+        // on this computer or on WebDAV), never in Zotero's storage.
+        const shared = this.sharedFolderOf(item);
+        if (shared) {
+            const file = await this.readSharedFile(item, shared, true);
+            if (!file) {
+                throw new ZotFlowError(
+                    ZotFlowErrorCode.RESOURCE_MISSING,
+                    "AttachmentService",
+                    `"${item.raw.data.filename}" is not in the group's shared folder.`,
+                );
+            }
+            return new Blob([file], {
+                type: item.raw.data.contentType || "application/pdf",
+            });
         }
         if (
             this.settings.useZoteroStorage &&

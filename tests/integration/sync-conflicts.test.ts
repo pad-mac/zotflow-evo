@@ -318,7 +318,7 @@ describe("accepting a remote deletion", () => {
         expect(await conflict("EDITED01")).toMatchObject({ kind: "changed" });
     });
 
-    test("deletes the rendered image of an image annotation it removes", async () => {
+    test("keeps the rendered image of an image annotation it removes", async () => {
         const lib = await harness();
         lib.addItem({ key: "PARENT01", data: { title: "p" } });
         lib.addItem({ key: "ATTACH01", data: { itemType: "attachment", parentItem: "PARENT01", linkMode: "imported_file", contentType: "application/pdf" } });
@@ -338,7 +338,8 @@ describe("accepting a remote deletion", () => {
         await new ConflictService(h.host, h.settings).resolveItemConflict(USER_ID, "IMAGE001", "accept-remote");
 
         expect(await row("IMAGE001")).toBeUndefined();
-        expect(h.host.binaryVault.has(png)).toBe(false);
+        // ZotFlow Evo (beta.15): kept for the source note.
+        expect(h.host.binaryVault.has(png)).toBe(true);
     });
 });
 

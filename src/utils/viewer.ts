@@ -1,4 +1,4 @@
-import { App, MarkdownView, TFile } from "obsidian";
+import { App, MarkdownView, Platform, TFile } from "obsidian";
 import { ZOTERO_READER_VIEW_TYPE, ZoteroReaderView } from "../ui/reader/view";
 import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "../ui/note-editor/view";
 import { workerBridge } from "../bridge";
@@ -9,13 +9,14 @@ import { newReaderLeaf } from "utils/evo-reader-leaf";
 import type { ReaderNavigation } from "types/zotero-reader";
 
 /**
- * ZotFlow Evo: a heads-up instead of a failed download — linked files live
- * outside Zotero's storage, where ZotFlow cannot reach them (yet).
+ * ZotFlow Evo: a heads-up instead of a failed read — a linked file is a
+ * file on a computer, outside Zotero's storage: it opens in the desktop
+ * app (since beta.15), not on a phone or tablet.
  */
 export function notifyLinkedFile(): void {
     services.notificationService.notify(
         "warning",
-        "This is a linked file, stored outside Zotero. ZotFlow can't open linked files yet; open it in Zotero.",
+        "This is a linked file, stored on a computer outside Zotero; it opens in Obsidian's desktop app only.",
     );
 }
 
@@ -54,15 +55,20 @@ export async function openAttachment(
     if (activeLeaf) {
         await focusReaderLeaf(app.workspace, activeLeaf);
     } else {
-        // ZotFlow Evo: a linked file cannot be fetched; say so, don't try.
-        const item = await workerBridge.dbHelper
-            .getItem(libraryID, key)
-            .catch(() => null);
-        const linkMode = (item?.raw?.data as { linkMode?: string } | undefined)
-            ?.linkMode;
-        if (linkMode === "linked_file") {
-            notifyLinkedFile();
-            return;
+        // ZotFlow Evo: a linked file is read from this computer's disk (as
+        // upstream does, with "attachments:" paths against the base folder
+        // set under General): not on a phone or tablet.
+        if (!Platform.isDesktopApp) {
+            const item = await workerBridge.dbHelper
+                .getItem(libraryID, key)
+                .catch(() => null);
+            const linkMode = (
+                item?.raw?.data as { linkMode?: string } | undefined
+            )?.linkMode;
+            if (linkMode === "linked_file") {
+                notifyLinkedFile();
+                return;
+            }
         }
         // ZotFlow Evo: a new tab, in a pane wide enough for a reader.
         activeLeaf = newReaderLeaf(app);

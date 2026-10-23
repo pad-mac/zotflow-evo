@@ -22,6 +22,7 @@ import {
 } from "utils/evo-library-model";
 
 import type ZotFlow from "main";
+import { renderSharedFolders } from "settings/sections/evo-shared-folders";
 import { services } from "services/services";
 
 import type {
@@ -351,6 +352,33 @@ export class EvoSection {
             },
             {
                 type: "group",
+                heading: "Group shared folders",
+                items: [
+                    {
+                        name: "Groups with their files in a shared folder",
+                        desc: "As the Zotero plugin Group Linked Files does it: the group's PDFs are in a shared folder (HU-Box, say) and not in Zotero's storage; the file name is the link. Set up the same groups here (on each device) so they open in Obsidian too: a folder on this computer, or the WebDAV server (also on a phone or tablet; a file is downloaded once when first opened). PDF editing and renaming are off for these groups.",
+                        render: (setting) => renderSharedFolders(this.plugin, setting),
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Annotation tags in source notes",
+                items: [
+                    {
+                        name: "Tag for each colour",
+                        desc: "Source notes list annotations with a tag of their kind and colour (#hl/yellow, #ul/red, #note/…, #img/…, #ink/…), for List Callouts Improved's tag callouts and for search. The colour's part of the tag can be renamed here (letters, digits, - and _). Takes effect when the notes are next updated.",
+                    },
+                    ...ANNOTATION_COLORS.map(
+                        ({ name, hex }): SettingGroupItem<SettingKey> => ({
+                            name,
+                            render: (setting) => this.tagRow(setting, hex, name),
+                        }),
+                    ),
+                ],
+            },
+            {
+                type: "group",
                 heading: "Authors",
                 items: [
                     {
@@ -461,6 +489,27 @@ export class EvoSection {
     }
 
     /** One colour of a drop table: a swatch, "before" and "after". */
+    /** One colour's tag name in source notes. */
+    private tagRow(setting: Setting, hex: string, name: string) {
+        const swatch = createSpan({ cls: "zotflow-evo-swatch" });
+        swatch.setCssProps({ "--zotflow-evo-swatch": hex });
+        setting.nameEl.prepend(swatch);
+        const id = hex.replace(/^#/, "").toLowerCase();
+        setting.addText((text) => {
+            text.setPlaceholder(name.toLowerCase())
+                .setValue(this.plugin.settings.evoAnnotationTagNames?.[id] ?? "")
+                .onChange(async (value) => {
+                    const clean = value.trim().replace(/[^\p{L}\p{N}_-]/gu, "");
+                    const table = { ...(this.plugin.settings.evoAnnotationTagNames ?? {}) };
+                    if (clean) table[id] = clean;
+                    else delete table[id];
+                    this.plugin.settings.evoAnnotationTagNames = table;
+                    await this.plugin.saveSettings();
+                });
+            text.inputEl.setAttribute("aria-label", `Tag for ${name}`);
+        });
+    }
+
     private colorRow(setting: Setting, key: DropTableKey, hex: string) {
         const swatch = createSpan({ cls: "zotflow-evo-swatch" });
         swatch.setCssProps({ "--zotflow-evo-swatch": hex });

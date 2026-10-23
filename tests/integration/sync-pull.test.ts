@@ -339,7 +339,8 @@ describe("item pull deletions", () => {
     });
 
     for (const annotationType of ["image", "ink"] as const) {
-        test(`deleting an ${annotationType} annotation removes its rendered image`, async () => {
+        // ZotFlow Evo (beta.15): kept for the source note, which keeps the removed annotation.
+        test(`deleting an ${annotationType} annotation keeps its rendered image`, async () => {
             h = await createSyncHarness({
                 settings: { annotationImageFolder: "ZotFlow/images" },
                 host: { files: { "ZotFlow/images/ANNOTAT1.png": "png bytes" } },
@@ -356,7 +357,8 @@ describe("item pull deletions", () => {
             lib.deleteItem("ANNOTAT1");
             await h.sync.startSync();
 
-            expect(h.host.vault.has("ZotFlow/images/ANNOTAT1.png")).toBe(false);
+            expect(await db.items.get([USER_ID, "ANNOTAT1"])).toBeUndefined();
+            expect(h.host.vault.has("ZotFlow/images/ANNOTAT1.png")).toBe(true);
         });
     }
 
@@ -380,7 +382,7 @@ describe("item pull deletions", () => {
         expect(h.host.vault.has("ZotFlow/images/ANNOTAT1.png")).toBe(true);
     });
 
-    test("a vault that refuses the image delete does not break the sync", async () => {
+    test("the image is not even tried to delete (a vault that refuses deletes is fine)", async () => {
         h = await createSyncHarness({
             settings: { annotationImageFolder: "ZotFlow/images" },
             host: { files: { "ZotFlow/images/ANNOTAT1.png": "png bytes" } },
@@ -398,14 +400,10 @@ describe("item pull deletions", () => {
         lib.deleteItem("ANNOTAT1");
         const result = await h.sync.startSync();
 
-        // The item is gone from the DB; only the leftover file remains.
+        // The item is gone from the DB; the image stays, untouched.
         expect(result.failCount).toBe(0);
         expect(await db.items.get([USER_ID, "ANNOTAT1"])).toBeUndefined();
-        expect(
-            h.host.logsAt("warn").some((l) =>
-                /Failed to delete annotation image ANNOTAT1/.test(l.message),
-            ),
-        ).toBe(true);
+        expect(h.host.vault.has("ZotFlow/images/ANNOTAT1.png")).toBe(true);
     });
 
     test("a cyclic parentItem does not stall the deletion cascade", async () => {

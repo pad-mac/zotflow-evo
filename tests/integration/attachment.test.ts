@@ -861,3 +861,73 @@ describe("updateSettings", () => {
         ]);
     });
 });
+
+/* ================================================================ */
+/*  ZotFlow Evo: a group's shared folder                            */
+/* ================================================================ */
+
+describe("a group's shared folder (Group Linked Files)", () => {
+    const webdav = {
+        id: "abc",
+        libraryID: USER_ID,
+        mode: "webdav",
+        folder: "",
+        webdavServer: "https://box.example.org/dav/",
+        webdavPath: "Projekt/PDFs",
+        webdavUser: "me",
+        password: "pw",
+    };
+
+    it("WebDAV: the file by its name, logged in; kept, then served from here", async () => {
+        h = await createAttachmentHarness({ settings: { evoGroupFolders: [webdav] as never } });
+        const item = await h.seedAttachment("SHARED01", { filename: "müller_1987.pdf", md5: undefined });
+        const calls: { url: string; auth?: string }[] = [];
+        h.host.request = async (req) => {
+            const r = req as { url: string; headers?: Record<string, string> };
+            calls.push({ url: r.url, auth: r.headers?.Authorization });
+            return { status: 200, headers: {}, arrayBuffer: bytes(7, 8, 9) };
+        };
+        expect(await readBlob(await h.service.getFileBlob(item))).toEqual([7, 8, 9]);
+        expect(calls).toEqual([
+            {
+                url: "https://box.example.org/dav/Projekt/PDFs/m%C3%BCller_1987.pdf",
+                auth: "Basic " + Buffer.from("me:pw").toString("base64"),
+            },
+        ]);
+        expect(await readBlob(await h.service.getFileBlob(item))).toEqual([7, 8, 9]);
+        expect(calls).toHaveLength(1);
+        expect(h.fetches).toEqual([]);
+    });
+
+    it("WebDAV: not there in either Unicode form → not found; a refused login said so", async () => {
+        h = await createAttachmentHarness({ settings: { evoGroupFolders: [webdav] as never } });
+        const item = await h.seedAttachment("SHARED02", { filename: "müller_1987.pdf" });
+        const urls: string[] = [];
+        h.host.request = async (req) => {
+            urls.push((req as { url: string }).url);
+            return { status: 404, headers: {}, arrayBuffer: new ArrayBuffer(0) };
+        };
+        await expect(h.service.getFileBlob(item)).rejects.toThrow(/not in the group's shared folder/);
+        expect(urls).toHaveLength(2);
+        h.host.request = async () => ({ status: 401, headers: {}, arrayBuffer: new ArrayBuffer(0) });
+        await expect(h.service.getFileBlob(item)).rejects.toThrow(/refused the user name or password/);
+    });
+
+    it("a folder on this computer: read from it, nothing downloaded or cached", async () => {
+        h = await createAttachmentHarness({
+            isDesktop: true,
+            settings: { evoGroupFolders: [{ ...webdav, mode: "folder", folder: "/HU-Box/PDFs" }] as never },
+        });
+        const item = await h.seedAttachment("SHARED03", { filename: "weber-ua_2004.pdf" });
+        const read: string[] = [];
+        h.host.readExternalBinaryFile = async (path) => {
+            read.push(path);
+            if (path === "/HU-Box/PDFs/weber-ua_2004.pdf") return bytes(4, 5);
+            throw new Error("ENOENT");
+        };
+        expect(await readBlob(await h.service.getFileBlob(item))).toEqual([4, 5]);
+        expect(read).toEqual(["/HU-Box/PDFs/weber-ua_2004.pdf"]);
+        expect(await h.getCached("SHARED03")).toBeUndefined();
+        expect(h.fetches).toEqual([]);
+    });
+});

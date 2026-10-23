@@ -17,6 +17,7 @@ import { connect, WindowMessenger, type Connection } from "penpal";
 import { getBlobUrls } from "bundle-assets/inline-assets";
 import { services } from "services/services";
 import { workerBridge } from "bridge";
+import { sharedFolderOf } from "ui/evo-library/shared-folder";
 import { requestReaderSDT } from "ui/reader/sdt";
 import { EnhancementPackInstallModal } from "ui/modals/enhancement-pack-install";
 
@@ -489,6 +490,17 @@ export class IframeReaderBridge {
                 };
             },
 
+            // ZotFlow Evo: why the PDF editing menu is off for this file (a
+            // linked file, or a group's shared folder), or null.
+            evoPdfEditBlocked: () => {
+                const data = this.attachmentItem?.raw?.data;
+                if (!data) return null;
+                if (data.linkMode === "linked_file")
+                    return "A linked file is not changed from here.";
+                if (sharedFolderOf(this.attachmentItem!.libraryID))
+                    return "This group keeps its files in a shared folder, which ZotFlow never changes.";
+                return null;
+            },
             evoMountItemEditor: (container: HTMLElement) => {
                 const item = this.attachmentItem;
                 if (!item) return null;

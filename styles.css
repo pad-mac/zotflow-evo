@@ -4378,10 +4378,6 @@ body.zotflow-evo-col-resizing * {
     color: var(--text-normal);
 }
 
-.zotflow-evo-details-file.is-linked {
-    color: var(--text-faint);
-}
-
 .zotflow-evo-details-file:hover {
     color: var(--interactive-accent);
 }
@@ -5011,13 +5007,31 @@ body.minimal-focus-mode
 /* ----- The PDF's outline among the annotations (beta.13) ----- */
 
 .zotflow-evo-details-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
     margin: 14px 8px 8px 0;
     padding-inline-start: calc(var(--zf-level, 0) * 12px);
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
-    font-weight: var(--font-semibold);
+    font-weight: 500;
     line-height: 1.35;
     cursor: pointer;
+}
+
+.zotflow-evo-details-heading-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* The page: subdued, in figures of one width. */
+.zotflow-evo-details-heading-page {
+    flex: none;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-normal, 400);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
 }
 
 .zotflow-evo-details-heading[data-level="0"] {
@@ -5047,7 +5061,7 @@ body.minimal-focus-mode
     margin-top: 0;
 }
 
-.zotflow-evo-details-heading:hover {
+.zotflow-evo-details-heading:hover .zotflow-evo-details-heading-title {
     color: var(--interactive-accent);
 }
 
@@ -5068,4 +5082,47 @@ body.minimal-focus-mode
 .zotflow-evo-details-abstract.is-editing {
     padding: 6px 10px;
     white-space: normal;
+}
+
+/* ----- A library table in a note (`zotflow-items` code block, beta.15) ----- */
+
+.zotflow-evo-items-block {
+    display: flex;
+    flex-direction: column;
+    margin: 4px 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m, 8px);
+    overflow: hidden;
+    background: var(--background-primary);
+}
+
+.zotflow-evo-items-block > .zotflow-evo-toolbar {
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.zotflow-evo-items-block-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.zotflow-evo-items-block .zotflow-evo-filter {
+    flex: 1 1 120px;
+    min-width: 80px;
+}
+
+.zotflow-evo-items-block-table {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.zotflow-evo-items-block-error {
+    color: var(--text-error);
+    font-size: var(--font-ui-small);
 }

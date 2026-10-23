@@ -54,6 +54,18 @@ export interface IParentProxy {
     deleteFile(path: string): Promise<void>;
     readExternalBinaryFile(absolutePath: string): Promise<ArrayBuffer>;
     statExternalFile(absolutePath: string): Promise<ExternalFileStat>;
+    /** ZotFlow Evo: the names of the files in a folder outside the vault (desktop only). */
+    listExternalFolder(absolutePath: string): Promise<string[]>;
+    /** ZotFlow Evo: a PDF's outline, read on the main thread from the file as it is on this device (see ui/evo-library/item-outline.ts). */
+    evoPdfOutline(
+        libraryID: number,
+        key: string,
+        md5: string | undefined,
+    ): Promise<
+        | { state: "ok"; headings: { title: string; level: number; page: number; top: number | null; label?: string }[] }
+        | { state: "none" }
+        | { state: "not-here" }
+    >;
     openFile(path: string, newLeaf: boolean): Promise<void>;
 
     // Index
