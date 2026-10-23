@@ -5,8 +5,42 @@ const CREDENTIAL_KEYS = ["webdavpassword", "zoteroapikey", "evoAnnasKey"] as con
 
 type CredentialKey = (typeof CREDENTIAL_KEYS)[number];
 
+/**
+ * ZotFlow Evo: the ID each credential is kept under. Obsidian takes only
+ * lowercase letters, digits and dashes and throws on anything else, so the
+ * Anna's key, first stored as "evoAnnasKey", lives under "evo-annas-key".
+ * A throw there used to stop every settings save before data.json.
+ */
+const SECRET_ID: Record<CredentialKey, string> = {
+    webdavpassword: "webdavpassword",
+    zoteroapikey: "zoteroapikey",
+    evoAnnasKey: "evo-annas-key",
+};
+
+/** IDs a credential was kept under before, read once to move it. */
+const LEGACY_IDS: Partial<Record<CredentialKey, string[]>> = {
+    evoAnnasKey: ["evoAnnasKey"],
+};
+
 /** Minimal shape: settings object must have the credential keys as optional strings. */
 type HasCredentials = { [K in CredentialKey]?: string };
+
+function readSecret(storage: SecretStorage, id: string): string | null {
+    try {
+        return storage.getSecret(id);
+    } catch {
+        return null;
+    }
+}
+
+/** Store one secret; a refused one must not stop the others (or the save). */
+function writeSecret(storage: SecretStorage, id: string, value: string): void {
+    try {
+        storage.setSecret(id, value);
+    } catch (e) {
+        console.warn(`[ZotFlow] Could not store the secret "${id}":`, e);
+    }
+}
 
 /**
  * Persist sensitive credentials to SecretStorage.
@@ -18,10 +52,10 @@ export function saveCredentials<T extends HasCredentials>(
     for (const key of CREDENTIAL_KEYS) {
         const value = settings[key];
         if (typeof value === "string" && value.length > 0) {
-            storage.setSecret(key, value);
+            writeSecret(storage, SECRET_ID[key], value);
         } else {
             // Remove stale secret if field was cleared
-            storage.setSecret(key, "");
+            writeSecret(storage, SECRET_ID[key], "");
         }
     }
 }
@@ -32,19 +66,31 @@ export function saveCredentials<T extends HasCredentials>(
  * Also handles one-time migration: if the value already exists in
  * settings (loaded from data.json) but not yet in SecretStorage,
  * it is copied to SecretStorage so that the next `stripCredentials`
- * call removes it from data.json.
+ * call removes it from data.json. A value kept under an older ID is
+ * moved to the current one.
  */
 export function loadCredentials<T extends HasCredentials>(
     settings: T,
     storage: SecretStorage,
 ): void {
     for (const key of CREDENTIAL_KEYS) {
-        const storedValue = storage.getSecret(key);
+        const id = SECRET_ID[key];
+        let storedValue = readSecret(storage, id);
+        if (!storedValue) {
+            for (const legacy of LEGACY_IDS[key] ?? []) {
+                const old = readSecret(storage, legacy);
+                if (old) {
+                    storedValue = old;
+                    writeSecret(storage, id, old);
+                    break;
+                }
+            }
+        }
 
         if (settings[key] && typeof settings[key] === "string") {
             // Migrate: value in data.json but not yet in SecretStorage
             if (!storedValue) {
-                storage.setSecret(key, settings[key]);
+                writeSecret(storage, id, settings[key]);
             }
         } else if (storedValue) {
             // Normal path: restore from SecretStorage
@@ -70,6 +116,6 @@ export function stripCredentials<T extends HasCredentials>(settings: T): T {
  */
 export function clearCredentials(storage: SecretStorage): void {
     for (const key of CREDENTIAL_KEYS) {
-        storage.setSecret(key, "");
+        writeSecret(storage, SECRET_ID[key], "");
     }
 }

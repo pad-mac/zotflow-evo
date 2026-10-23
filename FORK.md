@@ -94,7 +94,15 @@ Keep this list complete. One entry per change, newest last.
 | Item pane, beta.13: a linked file is said in the pane itself (under the files), not only when it is opened — so the pane kind of strip tab shows it too; the note-strip kind says it instead of "No file". The outline button in the pane's button row (saved, `evoItemPaneOutline`; every pane follows it) puts the PDF's outline among the annotations: a heading before the first annotation at or below where it points (the page, and its height for /XYZ and /FitH destinations); only headings with annotations in their part (to the next heading of the same or a higher level), so the list stays the annotations under their chapters; a click opens the PDF at the heading's page. The outline is read with Obsidian's pdf.js from the file as it is on this device (cache, Zotero's storage folder, a linked file) — no download for it; otherwise the pane says so | `ItemDetails.tsx`; `ui/evo-library/item-outline.ts`; `utils/evo-outline-list.ts`; `localFile()` in `worker/services/attachment.ts`; `stripAttachment()` in `evo-strip/strip-view.ts`; tests `evo-round10.test.ts` | Requested. Empty parts are left out by choice; the whole outline would bury the annotations of a long book. |
 | Reader popups (beta.13): the plugin's setting "Highlight / underline switch" (Reader page, "Reader popups"; off by default) is sent with the strip's appearance (`toolToggle`). Minimal's focus mode: the page number in the view header fades with the header's title and buttons | `noteStripSettings()` in `chrome.ts`; `styles.css` (`.zotflow-evo-header-page`) | Requested. |
 
-Known limits and open checks of these (as of 1.7.1-beta.13):
+Known limits and open checks of these (as of 1.7.1-beta.14):
+
+- beta.14: the Anna's key is kept in SecretStorage as `evo-annas-key`
+  (`utils/credentials.ts`). Obsidian takes only lowercase letters, digits
+  and dashes as a secret ID and throws on others; "evoAnnasKey" (since
+  beta.9) made every settings save throw before data.json was written
+  ("secret ID is invalid", e.g. on "Refresh Libraries"). A refused secret
+  no longer stops the save; a key under the old ID is moved. Test
+  `evo-credentials.test.ts`.
 
 - Showing a file uses Electron's `shell` from Obsidian's window; checked
   in unit tests (the paths) only, not in Obsidian. Minimal's focus-mode
