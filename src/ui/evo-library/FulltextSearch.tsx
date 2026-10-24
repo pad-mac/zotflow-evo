@@ -137,7 +137,9 @@ type Checked =
     | { state: "pending" }
     | { state: "none" }
     | { state: "found"; total: number; snippets: Snippet[] }
-    | { state: "notext" };
+    | { state: "notext" }
+    /** Zotero's index has it, the check found the words nowhere in the text. */
+    | { state: "indexonly" };
 
 function Select<T extends string>({
     label,
@@ -230,7 +232,7 @@ function HitView({
     const [all, setAll] = useState(false);
     if (!checked || checked.state === "pending" || checked.state === "none")
         return null;
-    if (checked.state === "notext") {
+    if (checked.state === "notext" || checked.state === "indexonly") {
         return (
             <div
                 className="zotflow-evo-fts-snippet is-notext"
@@ -238,7 +240,9 @@ function HitView({
             >
                 {label && <div className="zotflow-evo-fts-label">{label}</div>}
                 <div className="zotflow-evo-fts-text">
-                    In Zotero's index; its text is not on this computer.
+                    {checked.state === "notext"
+                        ? "In Zotero's index; its text is not on this computer."
+                        : "In Zotero's index; the words were not found as such in the text Zotero extracted (split across lines, say)."}
                 </div>
             </div>
         );
@@ -383,6 +387,29 @@ export function FulltextSearch({
         };
     }, [scopes, subcollections]);
 
+    // How many documents here Zotero's index has no entry for (a search
+    // cannot find those).
+    const [coverage, setCoverage] = useState<{
+        documents: number;
+        unindexed: number;
+    } | null>(null);
+    useEffect(() => {
+        let gone = false;
+        setCoverage(null);
+        if (!items) return undefined;
+        void fulltextEngine
+            .coverage([...items.keys()])
+            .then((c) => {
+                if (!gone) setCoverage(c);
+            })
+            .catch(() => {
+                // Said by the search itself (no index, say).
+            });
+        return () => {
+            gone = true;
+        };
+    }, [items]);
+
     const spec = useMemo<FulltextSpec>(
         () => ({ query: query.trim(), matchCase, wholeWords }),
         [query, matchCase, wholeWords],
@@ -433,11 +460,16 @@ export function FulltextSearch({
                                     spec,
                                     60,
                                 );
+                                // Without "match case" the index's word is
+                                // the check's too, so a document it finds is
+                                // listed even when the check does not.
                                 result = !found
                                     ? { state: "notext" }
                                     : found.total
                                       ? { state: "found", ...found }
-                                      : { state: "none" };
+                                      : spec.matchCase
+                                        ? { state: "none" }
+                                        : { state: "indexonly" };
                             } catch {
                                 result = { state: "notext" };
                             }
@@ -490,7 +522,11 @@ export function FulltextSearch({
             hits.filter((h) => {
                 // Shown once checked: found, or no text here to check.
                 const c = checked.get(h.itemID);
-                return c?.state === "found" || c?.state === "notext";
+                return (
+                    c?.state === "found" ||
+                    c?.state === "notext" ||
+                    c?.state === "indexonly"
+                );
             }),
         [hits, checked],
     );
@@ -687,6 +723,16 @@ export function FulltextSearch({
                     />
                 </span>
             </div>
+            {coverage && coverage.unindexed > 0 && (
+                <div className="zotflow-evo-fts-coverage">
+                    {coverage.unindexed} of {coverage.documents}{" "}
+                    {coverage.documents === 1 ? "document" : "documents"} here{" "}
+                    {coverage.unindexed === 1 ? "is" : "are"} not in Zotero's
+                    full-text index (not indexed yet, no text, or the file is
+                    not on this computer); searches cannot find{" "}
+                    {coverage.unindexed === 1 ? "it" : "them"}.
+                </div>
+            )}
             {(status || error) && (
                 <div
                     className={

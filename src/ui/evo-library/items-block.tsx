@@ -279,6 +279,20 @@ class ItemsBlockChild extends MarkdownRenderChild {
         const noteName =
             this.sourcePath.split("/").pop()?.replace(/\.md$/i, "") ?? "";
         const scope = scopeOf(spec, noteName);
+        // The table's own menus only: the note's menu (editor or reading
+        // view, both on an element around this one) would open over them.
+        // Registered before React's root listener on the same element, so
+        // React still gets the event; text fields keep the note's menu.
+        this.registerDomEvent(this.containerEl, "contextmenu", (e) => {
+            const target = e.target;
+            if (
+                target instanceof HTMLElement &&
+                target.closest("input, textarea, [contenteditable='true']")
+            )
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+        });
         this.root = createRoot(this.containerEl);
         const render = (label: string) =>
             this.root?.render(

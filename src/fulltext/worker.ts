@@ -5,15 +5,18 @@
  *
  * It holds in-memory copies of Zotero's `fulltext.sqlite` (the FTS5 index)
  * and, while loading, of `zotero.sqlite` (to turn Zotero's local item ids
- * into keys). The files themselves are never opened: the plugin reads their
- * bytes and hands them over. SQLite is the official WebAssembly build, which
- * has FTS5. See FORK.md, "Full-text search".
+ * into keys), each brought up to date with its write-ahead log (Zotero
+ * keeps recent changes there while it runs; utils/sqlite-wal.ts). The
+ * files themselves are never opened: the plugin reads their bytes and
+ * hands them over. SQLite is the official WebAssembly build, which has
+ * FTS5. See FORK.md, "Full-text search".
  */
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import * as Comlink from "comlink";
 import wasmBinary from "virtual:sqlite-wasm-binary";
 
 import { findMatches, makeSnippets } from "utils/evo-fulltext";
+import { applyWal } from "utils/sqlite-wal";
 
 import type { FulltextHit, FulltextSpec, Snippet } from "utils/evo-fulltext";
 
@@ -47,13 +50,22 @@ async function engine(): Promise<Sqlite3> {
     return sqlite;
 }
 
-/** An in-memory, read-only database from a file's bytes. */
-function openCopy(s: Sqlite3, buffer: ArrayBuffer): Database {
-    const bytes = new Uint8Array(buffer);
-    // A database in WAL mode (zotero.sqlite) cannot be opened from memory
-    // as such: say it is in rollback mode (bytes 18 and 19 of the header).
-    // Only this copy is changed. What still waits in the -wal file is not
-    // in it.
+/**
+ * An in-memory, read-only database from a file's bytes and its log's (the
+ * `-wal` file; null when there is none).
+ */
+function openCopy(
+    s: Sqlite3,
+    buffer: ArrayBuffer,
+    wal: ArrayBuffer | null,
+): Database {
+    const bytes = applyWal(
+        new Uint8Array(buffer),
+        wal ? new Uint8Array(wal) : null,
+    ).database;
+    // A database in WAL mode cannot be opened from memory as such: say it
+    // is in rollback mode (bytes 18 and 19 of the header). Only this copy
+    // is changed; the log is already in it.
     if (bytes[18] === 2) bytes[18] = 1;
     if (bytes[19] === 2) bytes[19] = 1;
     const db = new s.oo1.DB();
@@ -71,9 +83,19 @@ function openCopy(s: Sqlite3, buffer: ArrayBuffer): Database {
     return db;
 }
 
+/** Files whose text Zotero indexes (what a document without an entry is counted among). */
+const INDEXED_TYPES = new Set([
+    "application/pdf",
+    "application/epub+zip",
+    "text/html",
+    "text/plain",
+]);
+
 class FulltextWorker {
     private index: Database | null = null;
     private attachments = new Map<number, Attachment>();
+    /** Attachments the index has an entry for. */
+    private indexed = new Set<number>();
 
     /**
      * Take copies of the two files. `personalLibraryID`: ZotFlow's id of
@@ -84,10 +106,14 @@ class FulltextWorker {
         fulltext: ArrayBuffer,
         zotero: ArrayBuffer,
         personalLibraryID: number,
+        logs: { fulltext: ArrayBuffer | null; zotero: ArrayBuffer | null } = {
+            fulltext: null,
+            zotero: null,
+        },
     ): Promise<{ documents: number; attachments: number }> {
         const s = await engine();
         this.close();
-        const z = openCopy(s, zotero);
+        const z = openCopy(s, zotero, logs.zotero);
         try {
             const libraries = new Map<number, number>();
             for (const row of z.selectObjects(
@@ -128,12 +154,36 @@ class FulltextWorker {
         } finally {
             z.close();
         }
-        this.index = openCopy(s, fulltext);
-        const documents = Number(
-            this.index.selectValue("select count(*) from fulltextIndexState") ??
-                0,
+        this.index = openCopy(s, fulltext, logs.fulltext);
+        this.indexed = new Set(
+            (
+                this.index.selectArrays(
+                    "select itemID from fulltextIndexState",
+                ) as [number][]
+            ).map(([id]) => id),
         );
-        return { documents, attachments: this.attachments.size };
+        return {
+            documents: this.indexed.size,
+            attachments: this.attachments.size,
+        };
+    }
+
+    /**
+     * Of the documents of some items (`libraryID:key`), how many there are
+     * and how many the index has no entry for (not indexed yet, no text, or
+     * the file is not on that computer).
+     */
+    coverage(itemIds: string[]): { documents: number; unindexed: number } {
+        const wanted = new Set(itemIds);
+        let documents = 0;
+        let unindexed = 0;
+        for (const [itemID, a] of this.attachments) {
+            if (!INDEXED_TYPES.has(a.contentType)) continue;
+            if (!wanted.has(`${a.libraryID}:${a.parentKey ?? a.key}`)) continue;
+            documents++;
+            if (!this.indexed.has(itemID)) unindexed++;
+        }
+        return { documents, unindexed };
     }
 
     /** The documents that match an FTS5 expression, best first. */
@@ -183,6 +233,7 @@ class FulltextWorker {
     close(): void {
         this.index?.close();
         this.index = null;
+        this.indexed = new Set();
     }
 }
 

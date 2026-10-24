@@ -11,6 +11,7 @@ import {
     groupHits,
     hitLabel,
     makeSnippets,
+    normalizeForSearch,
     orderHits,
 } from "utils/evo-fulltext";
 
@@ -25,15 +26,27 @@ const spec = (query: string, matchCase = false, wholeWords = false) => ({
 describe("the query for the index", () => {
     it("the words as a phrase; a prefix unless whole words", () => {
         expect(ftsQuery(spec("technische Objekte"))).toBe(
-            '"technische Objekte"*',
+            '"technische objekte"*',
         );
         expect(ftsQuery(spec("technische Objekte", false, true))).toBe(
-            '"technische Objekte"',
+            '"technische objekte"',
         );
         expect(ftsQuery(spec('a "quoted" (b) OR c*'))).toBe(
-            '"a quoted b OR c"*',
+            '"a quoted b or c"*',
         );
         expect(ftsQuery(spec(" … - "))).toBeNull();
+    });
+
+    it("in the form Zotero keeps its index in (ß as ss, ligatures, accents)", () => {
+        // Zotero indexes normalizeForSearch(text): "Straße" is "strasse"
+        // there, so asking for "straße" would find nothing.
+        expect(ftsQuery(spec("Straße"))).toBe('"strasse"*');
+        expect(ftsQuery(spec("Ökonomie der Æsthetik"))).toBe(
+            '"okonomie der aesthetik"*',
+        );
+        expect(ftsQuery(spec("ﬁnden"))).toBe('"finden"*');
+        expect(ftsQuery(spec("decision–making"))).toBe('"decision making"*');
+        expect(normalizeForSearch("Ǆ Łódź „x“ ½")).toBe('dz lodz "x" 1/2');
     });
 });
 
@@ -72,6 +85,27 @@ describe("the check in the text", () => {
         const [s] = findMatches(t, spec("straße"));
         expect(t.slice(s!.start, s!.end)).toBe("Straße");
         expect(foldText("Ä").folded).toBe("a");
+    });
+
+    it("the text as the index has it: ligatures, ß, curly quotes and dashes", () => {
+        // PDF text often keeps ligatures ("ﬁ"); Zotero's index takes them
+        // apart, so a document it finds must be found by the check too.
+        const t = "Die Deﬁnition der Straße — „Medien“ und Medien–Theorie.";
+        const hit = (q: string) =>
+            findMatches(t, spec(q)).map((m) => t.slice(m.start, m.end));
+        expect(hit("definition")).toEqual(["Deﬁnition"]);
+        expect(hit("strasse")).toEqual(["Straße"]);
+        expect(hit("Straße")).toEqual(["Straße"]);
+        expect(hit("medien theorie")).toEqual(["Medien–Theorie"]);
+        expect(findMatches(t, spec("definition", false, true))).toHaveLength(1);
+        // With "match case": ligatures still taken apart, case kept.
+        expect(findMatches(t, spec("Definition", true))).toHaveLength(1);
+        expect(findMatches(t, spec("definition", true))).toHaveLength(0);
+    });
+
+    it("a final sigma is a sigma", () => {
+        const t = "ΟΔΟΣ και οδος";
+        expect(findMatches(t, spec("οδος"))).toHaveLength(2);
     });
 });
 

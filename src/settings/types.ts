@@ -189,6 +189,8 @@ export interface ZotFlowSettings {
     readerSelectionToolToggle: boolean;
     /** ZotFlow Evo: the item pane shows the PDF's outline among its annotations. */
     evoItemPaneOutline: boolean;
+    /** ZotFlow Evo: a new book section's annotations are removed from the book's PDF (moved, not copied). */
+    evoBookSectionRemoveAnnotations: boolean;
     /** ZotFlow Evo: group libraries whose files are in a shared folder (utils/evo-shared-folder.ts); passwords in SecretStorage. */
     evoGroupFolders: SharedFolderConfig[];
     /** ZotFlow Evo: the tag each annotation colour gets in source notes (by colour hex, without "#"). */
@@ -344,6 +346,7 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     readerNoteStripSpacing: 12,
     readerSelectionToolToggle: false,
     evoItemPaneOutline: false,
+    evoBookSectionRemoveAnnotations: true,
     evoGroupFolders: [],
     evoAnnotationTagNames: {},
     cslDefaultStyleId: "apa",

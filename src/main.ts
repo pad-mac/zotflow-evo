@@ -31,6 +31,7 @@ import { ZotFlowEditableRegionExtension } from "ui/editor/zotflow-editable-regio
 import { handleEditorDrop } from "ui/editor/citation-helper";
 import { startSync } from "ui/start-sync";
 import { registerReaderChromeCommands } from "ui/reader/chrome";
+import { registerBookSectionCommand } from "ui/reader/book-section-command";
 import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
 import { registerEvoLibrary } from "ui/evo-library/views";
 import { registerItemsBlock } from "ui/evo-library/items-block";
@@ -305,6 +306,7 @@ export default class ZotFlow extends Plugin {
         // ZotFlow Evo: reader toolbar, comment popup and note strip toggles;
         // the library browser tab.
         registerReaderChromeCommands(this);
+        registerBookSectionCommand(this);
         registerEvoWorkspaceCommands(this);
         registerEvoLibrary(this);
         registerItemsBlock(this);

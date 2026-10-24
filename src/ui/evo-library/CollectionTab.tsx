@@ -232,7 +232,7 @@ export function CollectionTab({
                                 libraryID: scope.libraryID,
                                 collectionKey: scope.collectionKey,
                             },
-                        ])
+                        ], leaf)
                     }
                 >
                     <Icon name="text-search" fallback="search" />

@@ -122,8 +122,9 @@ class FulltextEngine {
         const { fs, path } = node();
         const fulltext = path.join(dir, "fulltext.sqlite");
         const zotero = path.join(dir, "zotero.sqlite");
+        // The logs too: Zotero keeps recent changes in them while it runs.
         const stamps = await Promise.all(
-            [fulltext, zotero, zotero + "-wal"].map(async (file) => {
+            [fulltext, zotero, fulltext + "-wal", zotero + "-wal"].map(async (file) => {
                 try {
                     const s = await fs.promises.stat(file);
                     return `${s.size}:${s.mtimeMs}`;
@@ -161,14 +162,28 @@ class FulltextEngine {
                         b.byteOffset + b.byteLength,
                     );
                 };
-                const [ft, z] = await Promise.all([
+                // A log may be missing (Zotero closed: all is in the file).
+                const readLog = async (file: string) => {
+                    try {
+                        return await read(file + "-wal");
+                    } catch {
+                        return null;
+                    }
+                };
+                const [ft, z, ftLog, zLog] = await Promise.all([
                     read(fulltext),
                     read(zotero),
+                    readLog(fulltext),
+                    readLog(zotero),
                 ]);
+                const buffers = [ft, z, ftLog, zLog].filter(
+                    (b): b is ArrayBuffer => b !== null,
+                );
                 const result = await this.start().load(
-                    Comlink.transfer(ft, [ft]),
-                    Comlink.transfer(z, [z]),
+                    Comlink.transfer(ft, buffers),
+                    z,
                     personalLibraryID(),
+                    { fulltext: ftLog, zotero: zLog },
                 );
                 const info = { ...result, loadedAt: Date.now() };
                 this.loaded = { dir, stamp, info };
@@ -178,6 +193,14 @@ class FulltextEngine {
             }
         })();
         return this.loading;
+    }
+
+    /** Of some items' documents (`libraryID:key`), how many the index has no entry for. */
+    async coverage(
+        itemIds: string[],
+    ): Promise<{ documents: number; unindexed: number }> {
+        await this.ensureLoaded();
+        return this.start().coverage(itemIds);
     }
 
     /** The documents that match, best first. */

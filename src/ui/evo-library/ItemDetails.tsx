@@ -40,8 +40,14 @@ import {
 } from "ui/evo-library/reveal-file";
 import { openPersonNote } from "ui/evo-person";
 import { itemOutline } from "ui/evo-library/item-outline";
+import { showHeadingMenu } from "ui/evo-library/book-section";
 import { annotationColors } from "utils/evo-library-model";
-import { interleaveOutline, placementOf } from "utils/evo-outline-list";
+import {
+    foldableHeadings,
+    foldOutline,
+    interleaveOutline,
+    placementOf,
+} from "utils/evo-outline-list";
 import { openAttachment } from "utils/viewer";
 
 import type { App, WorkspaceLeaf } from "obsidian";
@@ -170,6 +176,29 @@ function useOutlineShown(): [boolean, () => void] {
     return [on, toggle];
 }
 
+/**
+ * The headings folded away in the item pane, per PDF (kept while Obsidian
+ * runs, so an item looked at again is as it was left).
+ */
+const foldedByPdf = new Map<string, Set<number>>();
+
+function useFolded(pdfId: string | null): [Set<number>, (next: Set<number>) => void] {
+    const [folded, setFoldedState] = useState<Set<number>>(
+        () => (pdfId && foldedByPdf.get(pdfId)) || new Set(),
+    );
+    useEffect(() => {
+        setFoldedState((pdfId && foldedByPdf.get(pdfId)) || new Set());
+    }, [pdfId]);
+    const setFolded = useCallback(
+        (next: Set<number>) => {
+            if (pdfId) foldedByPdf.set(pdfId, next);
+            setFoldedState(next);
+        },
+        [pdfId],
+    );
+    return [folded, setFolded];
+}
+
 /** The outline of the PDF whose annotations are shown, while the button is on. */
 function useItemOutline(
     on: boolean,
@@ -215,6 +244,9 @@ export function ItemDetails({
         return a?.kind === "pdf" ? a : null;
     }, [details]);
     const outline = useItemOutline(outlineOn, details?.libraryID, outlinePdf);
+    const [folded, setFolded] = useFolded(
+        details && outlinePdf ? `${details.libraryID}:${outlinePdf.key}` : null,
+    );
     const palette = useMemo(
         () => annotationColors(annotations ?? []),
         [annotations],
@@ -254,15 +286,30 @@ export function ItemDetails({
     const placements = new Map(
         details.annotations.map((a) => [a.id, placementOf(a.position)]),
     );
-    const entries: OutlineListEntry<CardAnnotation>[] =
-        outlineOn && outline?.state === "ok"
-            ? interleaveOutline(
-                  cards,
-                  outline.headings,
-                  (c) => placements.get(c.id) ?? null,
-                  { all: true },
-              )
-            : cards.map((annotation) => ({ kind: "annotation", annotation }));
+    const withOutline = outlineOn && outline?.state === "ok";
+    const entries: OutlineListEntry<CardAnnotation>[] = withOutline
+        ? interleaveOutline(
+              cards,
+              outline.headings,
+              (c) => placements.get(c.id) ?? null,
+              { all: true },
+          )
+        : cards.map((annotation) => ({ kind: "annotation", annotation }));
+    // Headings fold away what is under them (to the next of their level).
+    const shownEntries = foldOutline(entries, withOutline ? folded : new Set());
+    const canFold = withOutline ? foldableHeadings(entries) : new Set<number>();
+    const anyFolded = [...canFold].some((n) => folded.has(n));
+    const toggleFoldAll = () =>
+        setFolded(anyFolded ? new Set() : new Set(canFold));
+    const toggleFold = (n: number) => {
+        const next = new Set(folded);
+        if (!next.delete(n)) next.add(n);
+        setFolded(next);
+    };
+    // The annotations' part: with annotations, or with the outline shown
+    // (all of its headings, also without annotations).
+    const listShown =
+        details.annotations.length > 0 || (outlineOn && !!outlinePdf);
     // Linked files open in the desktop app (since beta.15); elsewhere the
     // pane says so.
     const linked = Platform.isDesktopApp
@@ -432,12 +479,9 @@ export function ItemDetails({
                         <Icon name="pencil" />
                     </span>
                 )}
-                {outlinePdf && details.annotations.length > 0 && (
+                {outlinePdf && (
                     <span
-                        className={
-                            "zotflow-evo-tool zotflow-evo-details-outline-toggle" +
-                            (outlineOn ? " is-on" : "")
-                        }
+                        className="zotflow-evo-tool zotflow-evo-details-outline-toggle"
                         role="button"
                         tabIndex={0}
                         title={
@@ -454,7 +498,12 @@ export function ItemDetails({
                             }
                         }}
                     >
-                        <Icon name="list-tree" fallback="list" />
+                        {/* Its icon says which it is: the outline among the
+                            annotations, or the annotations alone. */}
+                        <Icon
+                            name={outlineOn ? "list-tree" : "list"}
+                            fallback="list"
+                        />
                     </span>
                 )}
             </div>
@@ -466,21 +515,53 @@ export function ItemDetails({
                     />
                 </div>
             )}
-            {details.annotations.length > 0 && (
+            {listShown && (
                 <div className="zotflow-evo-details-annotations">
-                    {palette.length > 1 && (
+                    {(palette.length > 1 || canFold.size > 0) && (
                         <div className="zotflow-evo-details-annohead">
-                            <span className="zotflow-evo-details-annocount">
-                                {picked.length
-                                    ? `${cards.length} of ${details.annotations.length}`
-                                    : details.annotations.length}
-                            </span>
-                            <ColorSwatches
-                                palette={palette}
-                                current={filter.colors}
-                                onToggle={filter.toggle}
-                                onClear={filter.clear}
-                            />
+                            {palette.length > 1 && (
+                                <>
+                                    <span className="zotflow-evo-details-annocount">
+                                        {picked.length
+                                            ? `${cards.length} of ${details.annotations.length}`
+                                            : details.annotations.length}
+                                    </span>
+                                    <ColorSwatches
+                                        palette={palette}
+                                        current={filter.colors}
+                                        onToggle={filter.toggle}
+                                        onClear={filter.clear}
+                                    />
+                                </>
+                            )}
+                            {canFold.size > 0 && (
+                                <span
+                                    className="zotflow-evo-tool zotflow-evo-details-foldall"
+                                    role="button"
+                                    tabIndex={0}
+                                    title={
+                                        anyFolded
+                                            ? "Unfold all headings"
+                                            : "Fold all headings"
+                                    }
+                                    onClick={toggleFoldAll}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            toggleFoldAll();
+                                        }
+                                    }}
+                                >
+                                    <Icon
+                                        name={
+                                            anyFolded
+                                                ? "chevrons-up-down"
+                                                : "chevrons-down-up"
+                                        }
+                                        fallback="list"
+                                    />
+                                </span>
+                            )}
                         </div>
                     )}
                     {outlineOn && outlinePdf && outline && outline.state !== "ok" && (
@@ -490,11 +571,14 @@ export function ItemDetails({
                                 : "The outline shows once the PDF is on this device (opened once, or in Zotero's storage folder)."}
                         </div>
                     )}
-                    {entries.map((entry, i) =>
+                    {shownEntries.map(({ entry, heading: n, foldable, folded: isFolded }) =>
                         entry.kind === "heading" ? (
                             <div
-                                key={`h${i}`}
-                                className="zotflow-evo-details-heading"
+                                key={`h${n}`}
+                                className={
+                                    "zotflow-evo-details-heading" +
+                                    (isFolded ? " is-folded" : "")
+                                }
                                 data-level={Math.min(entry.heading.level, 4)}
                                 title="Open the PDF at this page"
                                 onClick={() => {
@@ -508,7 +592,55 @@ export function ItemDetails({
                                         }),
                                     );
                                 }}
+                                onContextMenu={(e) => {
+                                    if (!outlinePdf || outline?.state !== "ok")
+                                        return;
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const index = outline.headings.indexOf(
+                                        entry.heading,
+                                    );
+                                    if (index < 0) return;
+                                    showHeadingMenu(
+                                        {
+                                            libraryID: details.libraryID,
+                                            attachmentKey: outlinePdf.key,
+                                            context: {
+                                                headings: outline.headings,
+                                                index,
+                                                pageLabels: outline.pageLabels,
+                                                pageCount: outline.pageCount,
+                                            },
+                                        },
+                                        { x: e.clientX, y: e.clientY },
+                                        e.currentTarget.ownerDocument,
+                                    );
+                                }}
                             >
+                                <span
+                                    className={
+                                        "zotflow-evo-details-fold" +
+                                        (foldable ? "" : " is-empty")
+                                    }
+                                    role={foldable ? "button" : undefined}
+                                    aria-label={
+                                        foldable
+                                            ? isFolded
+                                                ? "Unfold"
+                                                : "Fold"
+                                            : undefined
+                                    }
+                                    onClick={
+                                        foldable
+                                            ? (e) => {
+                                                  e.stopPropagation();
+                                                  toggleFold(n);
+                                              }
+                                            : undefined
+                                    }
+                                >
+                                    {foldable && <Icon name="chevron-right" />}
+                                </span>
                                 <span className="zotflow-evo-details-heading-title">
                                     {entry.heading.title}
                                 </span>

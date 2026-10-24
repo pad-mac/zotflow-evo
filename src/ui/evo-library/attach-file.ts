@@ -444,14 +444,30 @@ export async function uploadAttachment(
     target: { libraryID: number; key: string },
     file: FetchedFile,
     /** For an item not synced here yet: what its file name is made of. */
-    parts?: {
-        lastName: string;
-        year: string;
-        shortTitle: string;
-        title: string;
-        itemType: string;
-    },
+    parts?: AttachNameParts,
 ): Promise<string> {
+    return (await uploadAttachmentWithKey(target, file, parts)).filename;
+}
+
+/** What a new attachment's file name is made of, for an item not synced here yet. */
+export interface AttachNameParts {
+    lastName: string;
+    year: string;
+    shortTitle: string;
+    title: string;
+    itemType: string;
+}
+
+/**
+ * uploadAttachment(), returning the new attachment's key too; `sync`
+ * false: no sync after it (the caller adds more first).
+ */
+export async function uploadAttachmentWithKey(
+    target: { libraryID: number; key: string },
+    file: FetchedFile,
+    parts?: AttachNameParts,
+    { sync = true }: { sync?: boolean } = {},
+): Promise<{ filename: string; key: string }> {
     const refusal = attachRefusal(target.libraryID);
     if (refusal) throw new Error(refusal);
     const apiKey = services.settings.zoteroapikey;
@@ -540,10 +556,11 @@ export async function uploadAttachment(
         );
 
     // Bring the new attachment here.
-    void startSync(target.libraryID, true).catch(() => {
-        // The next sync brings it.
-    });
-    return filename;
+    if (sync)
+        void startSync(target.libraryID, true).catch(() => {
+            // The next sync brings it.
+        });
+    return { filename, key: attachmentKey };
 }
 
 /* ------------------------------------------------------------------ */
@@ -639,6 +656,54 @@ export async function lookupIsbn(isbn: string): Promise<BookMetadata | null> {
     } catch {
         return null;
     }
+}
+
+/**
+ * ZotFlow Evo: create items with Zotero's web API (50 to a request, as it
+ * takes them): each one's new key, or null with why where Zotero refused
+ * it. A request that fails as a whole throws.
+ */
+export async function createItems(
+    libraryID: number,
+    items: Record<string, unknown>[],
+): Promise<{ key: string | null; message?: string }[]> {
+    const prefix = services.libraryCache.isGroup(libraryID)
+        ? `groups/${libraryID}`
+        : `users/${libraryID}`;
+    const out: { key: string | null; message?: string }[] = [];
+    for (let at = 0; at < items.length; at += 50) {
+        const batch = items.slice(at, at + 50);
+        const res = await requestUrl({
+            url: `https://api.zotero.org/${prefix}/items`,
+            method: "POST",
+            headers: {
+                "Zotero-API-Key": services.settings.zoteroapikey,
+                "Zotero-API-Version": "3",
+                "Zotero-Write-Token": writeToken(),
+            },
+            contentType: "application/json",
+            body: JSON.stringify(batch),
+            throw: false,
+        });
+        const json = jsonOf<{
+            successful?: Record<string, { key?: string }>;
+            failed?: Record<string, { message?: string }>;
+        }>(res);
+        if (res.status >= 300 || !json)
+            throw new Error(`Zotero refused the new items (${res.status}).`);
+        batch.forEach((_, i) => {
+            const key = json.successful?.[String(i)]?.key ?? null;
+            out.push(
+                key
+                    ? { key }
+                    : {
+                          key: null,
+                          message: json.failed?.[String(i)]?.message ?? "refused",
+                      },
+            );
+        });
+    }
+    return out;
 }
 
 /** Create a book item with Zotero's web API; returns its key. */

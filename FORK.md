@@ -100,8 +100,24 @@ Keep this list complete. One entry per change, newest last.
 | Author notes, beta.15: a template with Templater commands (`<% %>`) makes the note through Templater (`create_new_note_from_template`, the filled template as its text), so they run, with `tp.file.title` the person's name | `createWithTemplater()` in `ui/evo-person.ts` | Requested. |
 | Linked files open (beta.15): the fork's block from beta.7 is gone; upstream reads them on desktop (`attachments:` paths against the base folder under General). On a phone or tablet the item pane and the strip tab say they open on desktop only. Kinds by content type (`isLinkedFile()` for the mark); PDF editing and renaming stay off for them | `utils/viewer.ts`, `evo-library-model.ts`, `ItemDetails.tsx`, `evo-browser.ts`, `strip-view.ts`; `evoPdfEditBlocked` in `bridge.ts` | Requested ("yes"). |
 | Group shared folders (beta.15), the Zotero plugin Group Linked Files done here: a group's stored files are in a shared folder, the file name the link — a folder on this computer (desktop) or a WebDAV server (HU-Box's by default; also on mobile). Read: Zotero's storage folder first (the plugin keeps its WebDAV downloads there), then the folder (both Unicode forms of the name) or the server (Basic login, the password in SecretStorage as `evo-folder-<id>`; kept in the cache afterwards by file name), never Zotero's file storage. New files saved to an item of such a group (web viewer, Anna's Archive) get the group's scheme (default `{authors}_{year}`, umlauts as ae…, lowercase; a, b, … then (2) for names in use in the folder or by the group's attachments) and are written without overwriting (`wx`, `If-None-Match: *`); the attachment item is made without uploading. PDF editing, extracting into the group and renaming are off. Settings: Sync, "Group shared folders" (group, where, login, scheme with a preview, Test) | `utils/evo-shared-folder.ts`, `ui/evo-library/shared-folder.ts`, `readSharedFile()`/`listSharedFolder()`/`localFile()` in `worker/services/attachment.ts`, `uploadAttachment()` in `attach-file.ts`, `settings/sections/evo-shared-folders.ts`, `utils/credentials.ts`; tests `evo-shared-folder.test.ts`, `attachment.test.ts` | Requested ("port"); "Link matching files" and the status check of the Zotero plugin are not ported. |
+| Book sections (beta.16): right-click an outline heading in the item pane or the note strip, "Create book section…", or the reader's command "Create book section from the chapter being read" (the heading of the page read, among the shallowest level with more than one heading). A panel at the heading (no modal: clicking and scrolling elsewhere leave it; Escape or Cancel close it; moved by its head) takes the title (the heading's), the authors (the book's, "First Last; …") and the pages as the PDF numbers them (from the heading's page to the page before the next heading of its level or higher; typed labels are matched to pages, the PDF pages and the annotations that go along shown under it). Made with Zotero's API: a book section item with every field a book section has from the book (not its DOI, citation key, abstract or Extra), the book's title as book title, its tags and collections; the book's authors as book authors unless they are the section's authors, editors and translators as they were; a PDF of the pages, keeping their labels, attached and named like any file saved here (a group's shared folder gets it under its scheme); the annotations on those pages copied to it (their places on the new pages, text, comment, colour, tags). Setting (Reader, "Book sections"): remove them from the book's PDF, on by default (only those Zotero took); a sync brings it all | `utils/evo-book-section.ts`, `ui/evo-library/book-section.ts`, `ui/reader/book-section-command.ts`; `sectionAnnotations()` in `worker/services/evo-library.ts`; `createItems()`, `uploadAttachmentWithKey()` in `attach-file.ts`; `writeLabelRuns()` in `evo-pdf-labels.ts`; `evoHeadingMenu`/`evoSectionContext` in `view.ts` and `bridge.ts`; tests `evo-book-section.test.ts`, `evo-book-section-create.test.ts` | Requested. The book's source note shows annotations taken off it as removed (struck through, kept as a backup), as for any removed annotation. |
+| Item pane outline, beta.16: shown also for an item without annotations (all headings); a fold arrow before a heading with something under it (to the next heading of its level), and above the outline a button that folds or unfolds them all (folds kept per PDF while Obsidian runs); the outline button has no "on" background and shows only while the pointer is over the pane, its icon telling the state (list / list-tree) | `foldOutline()`, `foldableHeadings()` in `utils/evo-outline-list.ts`; `ItemDetails.tsx`; `styles.css` | Requested ("it seems you skipped some of this"). |
+| Beta.16 fixes and details: the library table in a note keeps its right-click to itself (Obsidian's note menu opened over the table's; text fields keep the note's menu); "Show file in …" finds a shared-folder group's files (the folder, both Unicode forms, then Zotero's storage; for WebDAV groups Zotero's storage only); the Anna's Archive pane opens 400 px wide, and the full-text search from a browser's button opens in a 400 px pane to its right (reused; from the command still in a tab); after a PDF edit the reader opens the new file at once from the copy kept here (it counts as the file while the item still has the md5 it replaced; the sync that brings the new md5 runs in the background) instead of waiting up to 90 s for that sync; a back arrow under the page number in the view's header (strip hidden; the reader has its own beside the strip) while the reader can go back | `items-block.tsx`; `reveal-file.ts`; `openBookSearch()`, `openFulltextSearch()` in `actions.ts`; `putEditedFile(…, replaces)`, `editedCopy()` in `worker/services/attachment.ts`, `reopen()` in `pdf-edit.ts`; `placeBack()` in `chrome.ts`, `evoNavigateBack` in `bridge.ts`; tests `attachment.test.ts`, `evo-round10.test.ts` | Requested. |
+| Full-text search, beta.16 (items missing from the results): the copies of `zotero.sqlite` and `fulltext.sqlite` are brought up to date with their write-ahead logs (Zotero keeps both in WAL mode and writes changes back into the files only now and then; recent items and recently indexed documents were missing, and a copy taken during a partial write-back could miss others); the query is put in the form Zotero builds its index in (`normalizeForSearch()`: "ß" as "ss", ligatures taken apart, accents off — a query with "ß" found nothing), and the text is checked in that form too (a PDF's "ﬁ" ligature made the check drop documents the index had found); without "match case" a document the index finds is listed even when the check does not find the words ("In Zotero's index; …"); a line says how many documents of the chosen collections have no entry in Zotero's index (not indexed yet, no text, or the file not on that computer) | `utils/sqlite-wal.ts` (WAL frames: salts and running checksums, up to the last commit), `src/fulltext/worker.ts` (`coverage()`), `fulltext-engine.ts`, `utils/evo-fulltext.ts`, `FulltextSearch.tsx`; tests `sqlite-wal.test.ts` (real WAL files from Node's SQLite), `evo-fulltext.test.ts` | Requested ("quite broken"). |
 
-Known limits and open checks of these (as of 1.7.1-beta.15):
+Known limits and open checks of these (as of 1.7.1-beta.16):
+
+- beta.16: book sections were checked against stand-ins for Zotero's API
+  (the item, the PDF, the annotations) and the panel in the browser rig,
+  not against Zotero's servers or in Obsidian; that Zotero takes image
+  and ink annotations made through the API (it renders an image
+  annotation's picture itself) is from its data model. The table's
+  right-click relies on Obsidian's note menu listening on an element
+  around the block (bubbling), not before it. The header's back arrow is
+  placed by measuring the header's page number; not looked at in
+  Obsidian or Minimal's focus mode. The full-text fixes were checked with
+  real WAL files and FTS5 indexes made by SQLite, not with a running
+  Zotero.
 
 - The list-format note, the shared folders and the code block were
   checked in unit and integration tests and the browser rigs, not in
@@ -190,9 +206,8 @@ Known limits and open checks of these (as of 1.7.1-beta.15):
   separated by form feeds, which gives the snippets their page), and the
   worker inside Obsidian. Without whole words a query also finds words
   that start with it, not words that contain it elsewhere (the index knows
-  word starts only). Whatever Zotero still keeps in `zotero.sqlite-wal` is
-  not in the copy until Zotero writes it into the database (items added
-  minutes ago may be missing from the mapping).
+  word starts only). (Until beta.15 whatever Zotero still kept in the
+  `-wal` files was not in the copies; since beta.16 they are read too.)
 - Renaming and moving collections, and the new item from an ISBN, were
   checked against stand-ins for Zotero's API, Open Library and Google
   Books.
@@ -242,6 +257,7 @@ only call into them; every such line is marked `ZotFlow Evo`.
 | PDF editing menu, beta.12: Shift+click ranges work (the range field echoed the picked pages back, which reset the range's start); "Page numbers" (ranges read from the PDF's labels; "+ Range from this page"; decimal or roman; first number) and "Outline" (the PDF's outline read with pdf.js; page typed as the PDF will show it; ‹ › and Tab/Shift+Tab for the level; ↗ goes to the page; Sort, Clear) — not together with a split; "Revert" (the copies, alone); straighten is now measured by the plugin; "Remove outline" is gone (the outline editor's Clear) | `setPicked()` in `pdf-edit-overlay.js`; `src/evo/pdf-structure-editors.js`; `pdf-edit-panel.js`; `deskew.mjs` removed (now the plugin's) | Requested. |
 | Popups, beta.13: the comment bubble (annotation popup, with the strip hidden) takes the keyboard when it opens, the cursor at the end of the comment, as in Zotero; one popup per annotation (keyed), and the editor's changes go to the annotation shown (its `onChange` was the first render's, so a popup that moved on to another annotation wrote into the first; `popupAnnotation`, undefined, in its drag and colour handlers, is `annotation`). The bubble and the colour bubble on `--background-primary`, the comment bubble in `--font-interface`, 300 px wide; every view popup rounded 12 px; the bubble's page is its number alone, in tabular figures. The colour bubble's highlight / underline switch is hidden unless the plugin's setting brings it back (`html.zf-evo-tool-toggle`), and without it a colour always highlights (an underline mode chosen before would stay on, out of sight). Highlights are drawn with rounded corners: 2 pt in PDFs (at most a quarter of the line; the rects' `radius`), 3 px in snapshots and EPUBs (the path, drawn the same way round so overlapping lines still make one shape) | `obsidian-editor.js` (`autoFocus`, `focusAtEnd()`), `annotation-popup.js`, `preview.js`, `reader-ui.js`, `selection-popup.js`, `selectionToolToggleShown()` in `obsidian-evo.js`; `_pushHighlight()` in `src/pdf/page.js`; `annotation-overlay.tsx`; `_evo.scss` | Requested. |
 | Reader, beta.15: the item editor in the strip's head as tall as its rows (it scrolls only when it would leave less than 120 px of the column; `--zf-evo-room`, measured on the column — the head's frame is as tall as its content, so `vh` measured itself); as a list, an annotation just made (here or in the pages, at most three at once, made in the last minute) is scrolled to the top of the strip, opened or not; the outline sidebar shows each entry's page (label, else number) subdued in tabular figures, titles at weight 500; no PDF editing menu where the plugin says why not (`evoPdfEditBlocked`: a linked file, a group's shared folder) | `strip-host.js` (`_roomObserver`), `note-strip.js`, `outline-view.js`, `reader-ui.js`, `_evo.scss` | Requested. |
+| Reader, beta.16: the strip's outline headings show their page (label, else number) subdued in tabular figures, at weight 500, also beside the page; a right-click on one goes to the plugin with the outline (`evoHeadingMenu`: headings with level and page, the one clicked, page labels, page count, the point in the reader's document) for "Create book section…"; child calls `evoSectionContext` (outline, labels, pages, page read) and `evoNavigateBack`; a grey back arrow under the page number beside the strip while the reader can go back (its own `navigateBack()`), and `back` with the page sent to the plugin for its header; the outline editor's "+ Entry at this page" takes the text selected in the PDF as the title and its page | `Heading`, `handleHeadingMenu` in `note-strip.js`; `reportHeadingMenu()` in `obsidian-evo.js`; `src/evo/back-arrow.js`; `evoSectionContext()`/`evoNavigateBack()` in `index.obsidian.reader.js` and `index.obsidian.js`; `selectionInView()` in `pdf-structure-editors.js`, `pdf-edit-panel.js`; `_evo.scss` | Requested. |
 
 Known limits of these: with the toolbar hidden, Tab still cycles through
 the hidden toolbar's focus groups (`focus-manager.js` is untouched), and the
@@ -257,10 +273,11 @@ appearance and read-aloud popups keep their 41px offset.
 - **Never touching Zotero's files.** The plugin reads the bytes of
   `fulltext.sqlite` and `zotero.sqlite` (Node `fs`, desktop only) and hands
   them to a worker of its own, which opens them as in-memory, read-only
-  databases (`sqlite3_deserialize`). `zotero.sqlite` is in WAL mode;
-  only in the copy are bytes 18–19 of the header set to rollback mode so it
-  opens. Copies are taken again when either file (or the -wal) changed,
-  checked before each search. `zotero.sqlite` is read once per copy for
+  databases (`sqlite3_deserialize`). Both are in WAL mode while Zotero
+  runs: the committed frames of each `-wal` are written into the copy
+  (`utils/sqlite-wal.ts`), and only in the copy are bytes 18–19 of the
+  header set to rollback mode so it opens. Copies are taken again when a
+  file or its `-wal` changed, checked before each search. `zotero.sqlite` is read once per copy for
   the attachments (local id → key, parent key, library) and closed.
 - **Only while used.** The worker (with SQLite's WebAssembly build, from
   `@sqlite.org/sqlite-wasm`, which has FTS5; sql.js has not) is bundled
@@ -271,9 +288,12 @@ appearance and read-aloud popups keep their 41px offset.
   the content table and the CJK table. They are kept to the items of the
   chosen collections (read from ZotFlow's database), at most 1000. Then
   each document's text is read and checked, six at a time: case and
-  whole words as asked, accents ignored unless "match case" (as the index
-  does). Documents without a match are dropped; ones whose text is not on
-  this computer are listed as such.
+  whole words as asked, the text and the query in the form Zotero indexes
+  (its `normalizeForSearch()`) unless "match case". Without "match case"
+  a document the index finds stays listed even when the check finds no
+  match; with it, those are dropped; ones whose text is not on this
+  computer are listed as such. How many documents of the chosen
+  collections have no entry in the index is said above the results.
 - **Libraries.** Zotero's local library 1 is ZotFlow's personal library;
   groups are matched by group id. Items of libraries ZotFlow does not sync
   are not listed (they are not in any chosen collection).

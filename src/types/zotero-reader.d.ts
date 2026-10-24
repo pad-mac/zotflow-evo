@@ -130,7 +130,24 @@ export type ChildEvents =
     /** ZotFlow Evo: a mirrored header button was clicked in the note strip, at x/y of the reader's document. */
     | { type: "noteStripAction"; id: string; x: number; y: number }
     | { type: "noteStripOpen"; location: Record<string, unknown> }
-    | { type: "pageInfo"; label: string; index: number; count: number }
+    /** `back`: the reader can go back to where it was before a jump (ZotFlow Evo). */
+    | {
+          type: "pageInfo";
+          label: string;
+          index: number;
+          count: number;
+          back?: boolean;
+      }
+    /** ZotFlow Evo: an outline heading right-clicked in the note strip (x/y in the reader's document). */
+    | {
+          type: "evoHeadingMenu";
+          headings: { title: string; level: number; page: number }[];
+          index: number;
+          pageLabels: string[];
+          pageCount: number;
+          x: number;
+          y: number;
+      }
     | { type: "pdfEditRequest"; request: PdfEditRequest }
     | {
           type: "openTagsPopup";
@@ -264,6 +281,15 @@ export type ChildAPI = {
     setToolbarHidden: (hidden: boolean) => Promise<boolean>;
     /** ZotFlow Evo */
     setNoteStrip: (settings: ReaderNoteStrip) => Promise<boolean>;
+    /** ZotFlow Evo: back to where the reader was before a jump (false: nowhere to go). */
+    evoNavigateBack: () => Promise<boolean>;
+    /** ZotFlow Evo: the outline (null: not read yet), page labels, pages and the page read, for a book section. */
+    evoSectionContext: () => Promise<{
+        headings: { title: string; level: number; page: number }[] | null;
+        pageLabels: string[];
+        pageCount: number;
+        pageIndex: number;
+    } | null>;
     destroy: () => Promise<boolean>;
 };
 

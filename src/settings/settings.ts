@@ -87,13 +87,14 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             {
                 type: "page",
                 name: "Reader",
-                desc: "Reader integration, annotation tools, fonts, color themes; the note strip; popups; OCR.",
+                desc: "Reader integration, annotation tools, fonts, color themes; the note strip; popups; book sections; OCR.",
                 items: [
                     ...(page("Reader")?.items ?? []),
                     ...pick(
                         "Note strip",
                         "Note strip appearance",
                         "Reader popups",
+                        "Book sections",
                         "OCR",
                     ),
                 ],

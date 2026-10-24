@@ -231,6 +231,8 @@ export function createFakeChild() {
         // ZotFlow Evo
         setToolbarHidden: vi.fn((_hidden: boolean) => Promise.resolve(true)),
         setNoteStrip: vi.fn((_settings: unknown) => Promise.resolve(true)),
+        evoNavigateBack: vi.fn(async () => true),
+        evoSectionContext: vi.fn(async () => null),
         destroy: vi.fn(() => Promise.resolve(true)),
     };
 }

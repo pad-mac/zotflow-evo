@@ -915,6 +915,19 @@ export class IframeReaderBridge {
         });
     }
 
+    /** ZotFlow Evo: back to where the reader was before a jump. */
+    evoNavigateBack() {
+        return this.runAfterReaderReady(async () => {
+            await this.child!.evoNavigateBack();
+        });
+    }
+
+    /** ZotFlow Evo: the outline and the page being read, for a book section. */
+    async evoSectionContext() {
+        if (this._state !== "reader-ready" || !this.child) return null;
+        return this.child.evoSectionContext();
+    }
+
     addAnnotation(annotation: AnnotationJSON) {
         return this.runAfterReaderReady(async () => {
             await this.child!.addAnnotation(annotation);

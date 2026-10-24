@@ -14,6 +14,11 @@ import {
     attachmentKind,
     choosePrimaryAttachment,
 } from "utils/evo-library-model";
+import {
+    isValidSharedFilename,
+    nameVariants,
+    sharedFolderFor,
+} from "utils/evo-shared-folder";
 
 import type { AttachmentData } from "types/zotero-item";
 import type { IDBZoteroItem } from "types/db-schema";
@@ -35,6 +40,16 @@ export interface FilePathSettings {
     linkedAttachmentBaseDir: string;
     zoteroStoragePath: string;
     evoZoteroDataDir: string;
+}
+
+/**
+ * A group with a shared folder (Sync, "Group shared folders"): its stored
+ * files are in that folder under their names; with WebDAV, only Zotero's
+ * storage folder holds a copy on this computer.
+ */
+export interface SharedPlace {
+    mode: "folder" | "webdav";
+    folder: string;
 }
 
 /** What of Node's `path` and `os` is used (passed in, for the tests). */
@@ -65,6 +80,7 @@ export function attachmentPathCandidates(
     key: string,
     settings: FilePathSettings,
     tools: PathTools,
+    shared: SharedPlace | null = null,
 ): string[] {
     if (data.linkMode === "linked_file") {
         const raw = data.path ?? "";
@@ -94,7 +110,22 @@ export function attachmentPathCandidates(
             "storage",
         ),
     );
-    return [...new Set(storages)].map((dir) => tools.join(dir, folder, name));
+    const inStorage = [...new Set(storages)].map((dir) =>
+        tools.join(dir, folder, name),
+    );
+    if (!shared) return inStorage;
+    // The Zotero plugin keeps a group's files in the shared folder; Zotero's
+    // storage folder may hold a copy too (its WebDAV downloads).
+    const sharedFolder = shared.folder.trim();
+    const inShared =
+        shared.mode === "folder" &&
+        sharedFolder &&
+        isValidSharedFilename(data.filename)
+            ? nameVariants(data.filename).map((variant) =>
+                  tools.join(expandHome(sharedFolder, tools), variant),
+              )
+            : [];
+    return [...new Set([...inShared, ...inStorage])];
 }
 
 /** The attachment a row stands for: itself, or the item's file (the one a double click opens, else any with a file). */
@@ -190,11 +221,16 @@ export async function revealItemFile(
         }
         const { fs, path, os, shell } = desktopModules();
         const data = factsOf(attachment);
+        const shared = sharedFolderFor(
+            services.settings.evoGroupFolders,
+            attachment.libraryID,
+        );
         const candidates = attachmentPathCandidates(
             data,
             attachment.key,
             services.settings,
             { join: (...p) => path.join(...p), home: os.homedir() },
+            shared,
         );
         const found = candidates.find((p) => {
             try {
@@ -218,6 +254,18 @@ export async function revealItemFile(
         }
         if (candidates.length === 0) {
             say("This item's file is not a file on disk (a link).");
+            return;
+        }
+        if (shared?.mode === "folder") {
+            say(
+                `The file is not in this group's shared folder on this computer: ${candidates[0] ?? ""}`,
+            );
+            return;
+        }
+        if (shared?.mode === "webdav") {
+            say(
+                "This group's files are on its WebDAV server; Zotero's storage folder on this computer has no copy of this one.",
+            );
             return;
         }
         say(

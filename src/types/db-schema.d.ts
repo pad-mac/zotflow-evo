@@ -144,6 +144,12 @@ export interface IDBZoteroFile {
      * old file (see AttachmentService.editedCopy()).
      */
     evoEdited?: boolean;
+    /**
+     * ZotFlow Evo: the md5 of the file the edited copy replaced (uploaded,
+     * but not synced back yet): while the item still has that md5, the
+     * copy is its current file.
+     */
+    evoReplaces?: string;
 }
 
 /* ------------------------------------------------------------------ */

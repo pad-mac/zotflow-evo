@@ -3,9 +3,10 @@
  * reader's `pdfEditRequest`). The file is rewritten here (pdf-lib, see
  * utils/evo-pdf-rewrite.ts), uploaded to Zotero's storage in place of the
  * old one (Zotero's file upload, `If-Match` the md5 this device knows), its
- * annotations moved with their pages, and the reader opened again once a
- * sync has brought the new file's md5. Extracted pages become a new PDF
- * (a standalone attachment) in the chosen collection.
+ * annotations moved with their pages, and the reader opened again at once
+ * from the copy kept here (a sync in the background brings the new file's
+ * md5). Extracted pages become a new PDF (a standalone attachment) in the
+ * chosen collection.
  *
  * The steps, each a pass of its own: split; straighten (each page's tilt
  * measured after the split, so the halves of a spread get their own);
@@ -159,17 +160,25 @@ async function replaceFile(
         bytes.byteOffset,
         bytes.byteOffset + bytes.byteLength,
     ) as ArrayBuffer;
+    // Kept here as the item's file from now on: the reader opens it
+    // without waiting for the sync that brings the new md5.
     await workerBridge.attachment.putEditedFile(
         item.libraryID,
         item.key,
         buffer,
         md5,
         filename,
+        "application/pdf",
+        item.raw.data.md5 || null,
     );
     return md5;
 }
 
-/** After the file was replaced: open it again once this device has it. */
+/**
+ * After the file was replaced (uploaded, and kept here): open it again at
+ * once from the copy kept here, and sync in the background (which brings
+ * the item's new md5).
+ */
 async function reopen(
     host: PdfEditHost,
     md5: string,
@@ -177,16 +186,15 @@ async function reopen(
 ): Promise<void> {
     const notify = services.notificationService;
     const item = host.attachment;
-    notify.notify("info", `PDF uploaded (${done}); opening it again after the sync…`);
-    if (await waitForMd5(item.libraryID, item.key, md5)) {
-        await host.reload();
-        notify.notify("success", `${done[0]!.toUpperCase()}${done.slice(1)}.`);
-    } else {
-        notify.notify(
-            "warning",
-            "The PDF was changed and uploaded, but this device has not synced it yet. Close and open it again after the next sync.",
-        );
-    }
+    await host.reload();
+    notify.notify("success", `${done[0]!.toUpperCase()}${done.slice(1)}.`);
+    void waitForMd5(item.libraryID, item.key, md5).then((synced) => {
+        if (!synced)
+            services.logService.warn(
+                "The edited PDF has not synced back yet",
+                "PdfEdit",
+            );
+    });
 }
 
 /** Revert to a copy kept before an edit (and before every edit after it). */

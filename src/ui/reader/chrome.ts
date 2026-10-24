@@ -381,6 +381,12 @@ class ReaderChromeControls {
      * it itself).
      */
     private readonly pageInfoEl: HTMLElement;
+    /**
+     * Under the page in the header: back to where the reader was before a
+     * jump, while it can go back (beside the strip the reader has its own).
+     */
+    private readonly backEl: HTMLElement;
+    private canGoBack = false;
     /** What was last sent to the strip, to send only changes. */
     private sentActions = "";
     private readonly withActionListener = new WeakSet<IframeReaderBridge>();
@@ -422,6 +428,30 @@ class ReaderChromeControls {
                 .querySelector(".view-header")
                 ?.appendChild(this.pageInfoEl);
         view.register(() => this.pageInfoEl.remove());
+        view.containerEl.addClass("zotflow-evo-has-back");
+        this.backEl = view.containerEl.createDiv({
+            cls: "zotflow-evo-header-back",
+            attr: {
+                role: "button",
+                "aria-label": "Back",
+                title: "Back to where you were before the jump",
+            },
+        });
+        setIcon(this.backEl, "arrow-left");
+        this.backEl.addEventListener("click", (e) => {
+            e.preventDefault();
+            const bridge = this.getBridge();
+            if (bridge)
+                ff(bridge.evoNavigateBack(), "Failed to go back in the reader");
+        });
+        view.register(() => {
+            this.backEl.remove();
+            view.containerEl.removeClass("zotflow-evo-has-back");
+        });
+        const win = view.containerEl.ownerDocument.defaultView ?? window;
+        const resize = new win.ResizeObserver(() => this.placeBack());
+        resize.observe(view.containerEl);
+        view.register(() => resize.disconnect());
         view.register(chromeChanged.subscribe(() => this.apply()));
         view.register(
             readerOpened.subscribe((bridge) => {
@@ -488,6 +518,8 @@ class ReaderChromeControls {
                 cls: "zotflow-evo-header-page-number",
                 text: `${event.index + 1} / ${event.count}`,
             });
+            this.canGoBack = !!event.back;
+            this.placeBack();
         });
         bridge.onEventType("noteStripAction", (event) => {
             const frame = this.view.containerEl.querySelector("iframe");
@@ -560,10 +592,35 @@ class ReaderChromeControls {
         showMenuOverFrame(menu, at, this.view.containerEl.ownerDocument);
     }
 
+    /**
+     * The back arrow: right under the page in the header, its right edge
+     * with the page's; shown while the reader can go back and the header
+     * (with the page) is.
+     */
+    private placeBack() {
+        const container = this.view.containerEl;
+        const page = this.pageInfoEl.getBoundingClientRect();
+        const shown =
+            this.canGoBack &&
+            !container.hasClass(HEADERLESS_CLASS) &&
+            page.width > 0;
+        this.backEl.toggleClass("is-shown", shown);
+        if (!shown) return;
+        const box = container.getBoundingClientRect();
+        const header = container
+            .querySelector(".view-header")
+            ?.getBoundingClientRect();
+        this.backEl.setCssProps({
+            "--zf-back-right": `${Math.max(0, Math.round(box.right - page.right))}px`,
+            "--zf-back-top": `${Math.round((header?.bottom ?? page.bottom) - box.top + 4)}px`,
+        });
+    }
+
     /** Hide or show the header, and send the strip the buttons to show for it. */
     private applyHeader() {
         const hide = this.headerless();
         this.view.containerEl.toggleClass(HEADERLESS_CLASS, hide);
+        this.placeBack();
         const bridge = this.getBridge();
         if (!bridge || bridge.state !== "reader-ready") return;
         const actions = hide ? this.headerActions() : [];

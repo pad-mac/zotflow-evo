@@ -931,3 +931,48 @@ describe("a group's shared folder (Group Linked Files)", () => {
         expect(h.fetches).toEqual([]);
     });
 });
+
+describe("a PDF rewritten here (PDF editing)", () => {
+    it("opens at once from the copy kept here, before a sync brings the new md5", async () => {
+        const item = await h.seedAttachment("ATTACH01", { md5: "OLDMD5" });
+        await h.seedCached("ATTACH01", { buffer: bytes(1, 1, 1), md5: "OLDMD5" });
+        await h.service.putEditedFile(
+            USER_ID,
+            "ATTACH01",
+            bytes(7, 7, 7),
+            "NEWMD5",
+            "paper.pdf",
+            "application/pdf",
+            "OLDMD5",
+        );
+        // The item still has the old md5 (no sync yet): the edit is its file.
+        expect(await readBlob(await h.service.getFileBlob(item))).toEqual([
+            7, 7, 7,
+        ]);
+        expect(h.fetches).toEqual([]);
+        // After the sync: the new md5, the same copy.
+        const synced = await h.seedAttachment("ATTACH01", { md5: "NEWMD5" });
+        expect(await readBlob(await h.service.getFileBlob(synced))).toEqual([
+            7, 7, 7,
+        ]);
+        expect(h.fetches).toEqual([]);
+    });
+
+    it("a file changed elsewhere since (a third md5) is not the copy kept here", async () => {
+        await h.seedAttachment("ATTACH01", { md5: "OLDMD5" });
+        await h.service.putEditedFile(
+            USER_ID,
+            "ATTACH01",
+            bytes(7, 7, 7),
+            "NEWMD5",
+            "paper.pdf",
+            "application/pdf",
+            "OLDMD5",
+        );
+        const other = await h.seedAttachment("ATTACH01", { md5: "THIRDMD5" });
+        h.setApiPayload(bytes(9, 9, 9));
+        const blob = await h.service.getFileBlob(other).catch(() => null);
+        expect(h.fetches.length).toBeGreaterThan(0);
+        if (blob) expect(await readBlob(blob)).not.toEqual([7, 7, 7]);
+    });
+});

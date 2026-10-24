@@ -33,6 +33,7 @@ import { Zotero_Item_Types } from "types/zotero-item-const";
 import { ITEM_TYPE_CREATORS, ITEM_TYPE_FIELDS } from "types/zotero-csl-schema";
 import { makeCitationKey, uniqueCitationKey } from "utils/evo-citekey";
 import { sharedFolderFor } from "utils/evo-shared-folder";
+import { sectionAnnotation } from "utils/evo-book-section";
 
 import type { LibraryService } from "./library";
 import type { IParentProxy } from "bridge/types";
@@ -553,6 +554,40 @@ export class EvoLibraryService {
         const written = await mutateItems(libraryID, edits);
         const changed = written.filter(Boolean).length;
         return { changed, skipped: edits.length - changed };
+    }
+
+    /**
+     * ZotFlow Evo: the annotations of a PDF on pages `first`–`last`
+     * (0-based), as the annotations of a book section's PDF made of those
+     * pages (utils/evo-book-section.ts: their places on its pages), each
+     * with the key of the one it is made from. Those in the trash are
+     * left.
+     */
+    async sectionAnnotations(
+        libraryID: number,
+        attachmentKey: string,
+        first: number,
+        last: number,
+    ): Promise<{ key: string; data: Record<string, unknown> }[]> {
+        const annotations = await db.items
+            .where(["libraryID", "parentItem", "itemType", "trashed"])
+            .equals([libraryID, attachmentKey, "annotation", 0])
+            .toArray();
+        const out: { key: string; data: Record<string, unknown> }[] = [];
+        for (const item of annotations) {
+            const data = sectionAnnotation(
+                item.raw.data as unknown as Record<string, unknown>,
+                first,
+                last,
+            );
+            if (data) out.push({ key: item.key, data });
+        }
+        // In the order of the pages.
+        return out.sort((a, b) =>
+            String(a.data.annotationSortIndex).localeCompare(
+                String(b.data.annotationSortIndex),
+            ),
+        );
     }
 
     /**

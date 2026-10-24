@@ -29,10 +29,21 @@ export const ANNOTATIONS_VIEW_TYPE = "zotflow-evo-annotations";
 export const DETAILS_VIEW_TYPE = "zotflow-evo-details";
 export const FULLTEXT_VIEW_TYPE = "zotflow-evo-fulltext";
 
-/** Open the full-text search in a tab, searching in `scopes` (a library: collectionKey null). */
+/** The pane the last full-text search beside a browser opened in (reused by the next). */
+let fulltextLeaf: WorkspaceLeaf | null = null;
+
+/** How wide the full-text search opens beside a browser, in pixels. */
+const FULLTEXT_PANE_WIDTH = 400;
+
+/**
+ * Open the full-text search, searching in `scopes` (a library:
+ * collectionKey null): in a pane `FULLTEXT_PANE_WIDTH` wide to the right of
+ * `from` (the browser's button), else in a tab (the command).
+ */
 export async function openFulltextSearch(
     app: App,
     scopes: { libraryID: number; collectionKey: string | null }[],
+    from?: WorkspaceLeaf,
 ): Promise<void> {
     if (!Platform.isDesktopApp) {
         services.notificationService.notify(
@@ -41,13 +52,24 @@ export async function openFulltextSearch(
         );
         return;
     }
-    const leaf = app.workspace.getLeaf("tab");
+    const beside = !!from && !inSidebar(app, from);
+    const alive =
+        beside &&
+        !!fulltextLeaf &&
+        app.workspace.getLeavesOfType(FULLTEXT_VIEW_TYPE).includes(fulltextLeaf);
+    const leaf = !beside
+        ? app.workspace.getLeaf("tab")
+        : alive
+          ? fulltextLeaf!
+          : app.workspace.createLeafBySplit(from, "vertical");
+    if (beside) fulltextLeaf = leaf;
     await leaf.setViewState({
         type: FULLTEXT_VIEW_TYPE,
         active: true,
         state: { scopes, query: "" },
     });
     await app.workspace.revealLeaf(leaf);
+    if (beside && !alive) setPaneWidth(leaf, FULLTEXT_PANE_WIDTH);
 }
 
 function inSidebar(app: App, leaf: WorkspaceLeaf): boolean {
@@ -267,7 +289,7 @@ export async function openBookSearch(
 }
 
 /** How wide the web viewer opens beside the browser, in pixels. */
-const SEARCH_PANE_WIDTH = 640;
+const SEARCH_PANE_WIDTH = 400;
 
 /** Obsidian's layout items as far as sizing goes (not in the public typings). */
 interface SizedItem {

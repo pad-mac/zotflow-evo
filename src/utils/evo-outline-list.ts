@@ -116,3 +116,55 @@ export function interleaveOutline<T>(
     }
     return out;
 }
+
+/** An entry as listed with folded headings: a heading's number among the headings, and whether it has a part to fold. */
+export interface ShownOutlineEntry<T> {
+    entry: OutlineListEntry<T>;
+    /** The heading's number (in order); -1 for an annotation. */
+    heading: number;
+    /** A heading with something in its part (annotations, deeper headings). */
+    foldable: boolean;
+    folded: boolean;
+}
+
+/**
+ * The entries with the parts of folded headings left out; a part runs to
+ * the next heading of the same or a higher level. `folded` holds heading
+ * numbers (see ShownOutlineEntry).
+ */
+export function foldOutline<T>(
+    entries: OutlineListEntry<T>[],
+    folded: ReadonlySet<number>,
+): ShownOutlineEntry<T>[] {
+    const out: ShownOutlineEntry<T>[] = [];
+    let number = 0;
+    let hideBelow: number | null = null;
+    entries.forEach((entry, i) => {
+        if (entry.kind === "heading") {
+            const n = number++;
+            const level = entry.heading.level;
+            if (hideBelow !== null && level <= hideBelow) hideBelow = null;
+            if (hideBelow !== null) return;
+            const next = entries[i + 1];
+            const foldable =
+                !!next &&
+                (next.kind === "annotation" || next.heading.level > level);
+            const isFolded = foldable && folded.has(n);
+            out.push({ entry, heading: n, foldable, folded: isFolded });
+            if (isFolded) hideBelow = level;
+            return;
+        }
+        if (hideBelow !== null) return;
+        out.push({ entry, heading: -1, foldable: false, folded: false });
+    });
+    return out;
+}
+
+/** The numbers of the headings that have a part to fold (to fold them all). */
+export function foldableHeadings<T>(entries: OutlineListEntry<T>[]): Set<number> {
+    return new Set(
+        foldOutline(entries, new Set())
+            .filter((e) => e.foldable)
+            .map((e) => e.heading),
+    );
+}

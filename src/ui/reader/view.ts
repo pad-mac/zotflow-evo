@@ -27,6 +27,12 @@ import {
 } from "utils/error";
 import { pdfFilterKey } from "utils/evo-pdf-filter";
 import { runPdfEdit } from "ui/reader/pdf-edit";
+import {
+    openBookSectionPanel,
+    showHeadingMenu,
+} from "ui/evo-library/book-section";
+import { itemOutline } from "ui/evo-library/item-outline";
+import { headingAtPage } from "utils/evo-book-section";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import {
     attachReaderChromeControls,
@@ -138,6 +144,65 @@ export class ZoteroReaderView extends ItemView {
         if (!item) return;
         this.attachmentItem = item;
         ff(this.loadDocument(), "Failed to load the edited document");
+    }
+
+    /**
+     * ZotFlow Evo: the panel for a book section of the part being read (the
+     * reader's command): the heading the page belongs to, from the outline
+     * the reader has (else the file's, read here).
+     */
+    async evoBookSection(): Promise<void> {
+        const item = this.attachmentItem;
+        if (!item || item.raw.data.contentType !== "application/pdf") {
+            services.notificationService.notify(
+                "info",
+                "Book sections are made from PDFs.",
+            );
+            return;
+        }
+        const reader = await this.bridge?.evoSectionContext().catch(() => null);
+        if (!reader) {
+            services.notificationService.notify(
+                "info",
+                "The PDF is not open yet.",
+            );
+            return;
+        }
+        let headings = reader.headings;
+        if (!headings) {
+            const read = await itemOutline(
+                item.libraryID,
+                item.key,
+                item.raw.data.md5 ?? undefined,
+            );
+            headings =
+                read.state === "ok"
+                    ? read.headings.map((h) => ({
+                          title: h.title,
+                          level: h.level,
+                          page: h.page,
+                      }))
+                    : [];
+        }
+        const index = headingAtPage(headings, reader.pageIndex);
+        const box = this.containerEl.getBoundingClientRect();
+        openBookSectionPanel(
+            {
+                libraryID: item.libraryID,
+                attachmentKey: item.key,
+                context: {
+                    headings,
+                    index,
+                    pageLabels: reader.pageLabels,
+                    pageCount: reader.pageCount,
+                },
+            },
+            { x: box.left + box.width / 2 - 160, y: box.top + 60 },
+            this.containerEl.ownerDocument,
+            index === null
+                ? { first: reader.pageIndex, last: reader.pageIndex }
+                : undefined,
+        );
     }
 
     /** ZotFlow Evo: close the document shown (for a subclass). */
@@ -476,6 +541,34 @@ export class ZoteroReaderView extends ItemView {
                             evt.request,
                         ),
                         "PDF editing failed",
+                    );
+                });
+
+                // ZotFlow Evo: an outline heading right-clicked in the note
+                // strip: "Create book section…" (book-section.ts).
+                this.bridge.onEventType("evoHeadingMenu", (evt) => {
+                    const item = this.attachmentItem;
+                    if (!item) return;
+                    const box = this.containerEl
+                        .querySelector("iframe")
+                        ?.getBoundingClientRect();
+                    showHeadingMenu(
+                        {
+                            libraryID: item.libraryID,
+                            attachmentKey: item.key,
+                            context: {
+                                headings: evt.headings,
+                                index: evt.index,
+                                pageLabels: evt.pageLabels,
+                                pageCount: evt.pageCount,
+                            },
+                        },
+                        {
+                            x: (box?.left ?? 0) + evt.x,
+                            y: (box?.top ?? 0) + evt.y,
+                        },
+                        this.containerEl.ownerDocument,
+                        true,
                     );
                 });
 

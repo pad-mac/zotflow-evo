@@ -352,6 +352,29 @@ export class EvoSection {
             },
             {
                 type: "group",
+                heading: "Book sections",
+                items: [
+                    {
+                        name: "Remove the annotations from the book's PDF",
+                        desc: "A book section made from an outline heading (right-click it in the item pane or the note strip) gets its pages as a PDF of its own, and the annotations on them go with it. On, they are taken off the book's PDF, so each annotation is in one place only (overviews and source notes show it once); off, the book keeps them too.",
+                        render: (setting) =>
+                            setting.addToggle((toggle) =>
+                                toggle
+                                    .setValue(
+                                        this.plugin.settings
+                                            .evoBookSectionRemoveAnnotations,
+                                    )
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoBookSectionRemoveAnnotations =
+                                            value;
+                                        await this.plugin.saveSettings();
+                                    }),
+                            ),
+                    },
+                ],
+            },
+            {
+                type: "group",
                 heading: "Group shared folders",
                 items: [
                     {

@@ -12,13 +12,49 @@ export interface FulltextSpec {
     wholeWords: boolean;
 }
 
-/** Letters, digits and combining marks: what `unicode61` keeps as a word. */
-const WORD = /[\p{L}\p{N}\p{M}]+/gu;
+/** Letters, digits and combining marks: a word of the text, for the check. */
 const WORD_CHAR = "[\\p{L}\\p{N}\\p{M}]";
+/** A word of the query as Zotero asks its index (normalized text: letters and digits). */
+const INDEX_WORD = /[\p{L}\p{N}]+/gu;
 
-/** The words of a query, as the index splits text into words. */
+/** Letters Zotero's search folds by hand (NFKD does not take them apart). */
+const LETTERS: Record<string, string> = {
+    "\u00f8": "o",
+    "\u0153": "oe",
+    "\u00e6": "ae",
+    "\u0142": "l",
+    "\u0111": "d",
+    "\u00f0": "d",
+    "\u00fe": "th",
+    "\u00df": "ss",
+    "\u0131": "i",
+    "\u2044": "/",
+};
+const LETTERS_RE = /[\u00f8\u0153\u00e6\u0142\u0111\u00f0\u00fe\u00df\u0131\u2044]/g;
+
+/**
+ * Text as Zotero's full-text index holds it: its `normalizeForSearch()`
+ * (compatibility forms taken apart, so "ﬁ" is "fi"; accents off; lower
+ * case; ß as ss, æ as ae and the like; curly quotes and dashes as plain
+ * ones). Zotero builds the index from this form of the text and asks it in
+ * this form, so the query has to be in it too ("Straße" is "strasse"
+ * there).
+ */
+export function normalizeForSearch(text: string): string {
+    return text
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(LETTERS_RE, (c) => LETTERS[c] ?? c)
+        .replace(/[\u2018\u2019\u201a\u201b\u2032]/g, "'")
+        .replace(/[\u201c\u201d\u201e\u201f\u2033]/g, '"')
+        .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+        .normalize("NFC");
+}
+
+/** The words of a query, as the index has them. */
 export function queryWords(query: string): string[] {
-    return query.match(WORD) ?? [];
+    return normalizeForSearch(query).match(INDEX_WORD) ?? [];
 }
 
 /**
@@ -34,15 +70,41 @@ export function ftsQuery(spec: FulltextSpec): string | null {
     return spec.wholeWords ? phrase : `${phrase}*`;
 }
 
-/** Text without case and accents, and where each of its characters came from. */
-export function foldText(text: string): { folded: string; from: number[] } {
+/**
+ * One character for the check. Without "match case" as the index has it
+ * (normalizeForSearch, and a final sigma as any sigma: lower case one
+ * character at a time cannot tell); with it only its compatibility form
+ * ("ﬁ" as "fi"), case and accents kept.
+ */
+function foldChar(ch: string, matchCase: boolean): string {
+    // Most of a text is ASCII: no table needed.
+    if (ch.length === 1 && ch.charCodeAt(0) < 0x80)
+        return matchCase ? ch : ch.toLowerCase();
+    const cache = matchCase ? FOLDED_CASE : FOLDED;
+    let f = cache.get(ch);
+    if (f === undefined) {
+        f = matchCase
+            ? ch.normalize("NFKC")
+            : normalizeForSearch(ch).replace(/\u03c2/g, "\u03c3");
+        cache.set(ch, f);
+    }
+    return f;
+}
+const FOLDED = new Map<string, string>();
+const FOLDED_CASE = new Map<string, string>();
+
+/** Text folded for the check, and where each of its characters came from. */
+export function foldText(
+    text: string,
+    matchCase = false,
+): { folded: string; from: number[] } {
     const parts: string[] = [];
     const from: number[] = [];
     let i = 0;
     while (i < text.length) {
         const cp = text.codePointAt(i)!;
         const ch = String.fromCodePoint(cp);
-        const f = ch.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+        const f = foldChar(ch, matchCase);
         parts.push(f);
         for (let k = 0; k < f.length; k++) from.push(i);
         i += ch.length;
@@ -55,11 +117,12 @@ function escapeRegExp(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** A matcher for the query: its words in a row, separated by anything that is not a word. */
+/** A matcher for the (folded) query: its words in a row, separated by anything that is not a word. */
 export function matcher(spec: FulltextSpec): RegExp | null {
-    const words = queryWords(spec.query).map((w) =>
-        spec.matchCase ? w : foldText(w).folded,
-    );
+    const words =
+        foldText(spec.query, spec.matchCase).folded.match(
+            new RegExp(`${WORD_CHAR}+`, "gu"),
+        ) ?? [];
     if (!words.length) return null;
     let body = words.map(escapeRegExp).join(`(?:(?!${WORD_CHAR})[\\s\\S])+`);
     if (spec.wholeWords) body = `(?<!${WORD_CHAR})${body}(?!${WORD_CHAR})`;
@@ -75,14 +138,7 @@ export function findMatches(
     const re = matcher(spec);
     if (!re) return [];
     const out: { start: number; end: number }[] = [];
-    if (spec.matchCase) {
-        for (const m of text.matchAll(re)) {
-            out.push({ start: m.index, end: m.index + m[0].length });
-            if (out.length >= limit) break;
-        }
-        return out;
-    }
-    const { folded, from } = foldText(text);
+    const { folded, from } = foldText(text, spec.matchCase);
     for (const m of folded.matchAll(re)) {
         const start = from[m.index]!;
         const endIndex = m.index + m[0].length;

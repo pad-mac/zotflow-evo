@@ -38,6 +38,24 @@ describe("an attachment's place on disk", () => {
             ),
         ).toEqual(["/z/storage/ABCD1234/a.html"]);
     });
+    it("a group with a shared folder (beta.16): the folder first (both Unicode forms), then Zotero's storage", () => {
+        const name = "sta\u0308heli_2010.pdf";
+        expect(
+            attachmentPathCandidates({ linkMode: "imported_file", filename: name }, "ABCD1234", none, tools, { mode: "folder", folder: "~/HU-Box/Group" }),
+        ).toEqual([
+            `/home/p/HU-Box/Group/${name}`,
+            `/home/p/HU-Box/Group/${name.normalize("NFC")}`,
+            `/home/p/Zotero/storage/ABCD1234/${name}`,
+        ]);
+        // WebDAV: only Zotero's storage folder can have it on this computer.
+        expect(
+            attachmentPathCandidates({ linkMode: "imported_file", filename: "a.pdf" }, "ABCD1234", none, tools, { mode: "webdav", folder: "" }),
+        ).toEqual(["/home/p/Zotero/storage/ABCD1234/a.pdf"]);
+        // A name that would leave the folder: not looked for there.
+        expect(
+            attachmentPathCandidates({ linkMode: "imported_file", filename: "../a.pdf" }, "ABCD1234", none, tools, { mode: "folder", folder: "/g" }),
+        ).toEqual([]);
+    });
     it("nothing for a link, or names that would leave the folder", () => {
         expect(attachmentPathCandidates({ linkMode: "linked_url" }, "K", none, tools)).toEqual([]);
         expect(attachmentPathCandidates({ linkMode: "imported_file", filename: "../x.pdf" }, "K", none, tools)).toEqual([]);

@@ -27,6 +27,7 @@ interface PdfOutlineNode {
 }
 
 interface PdfDoc {
+    numPages?: number;
     getOutline(): Promise<PdfOutlineNode[] | null>;
     getPageLabels?(): Promise<string[] | null>;
     getDestination(name: string): Promise<unknown[] | null>;
@@ -34,9 +35,17 @@ interface PdfDoc {
     destroy(): Promise<void>;
 }
 
-/** What came of reading: the headings, or why there are none. */
+/**
+ * What came of reading: the headings (with the PDF's page labels, "" where
+ * a page has none, and its number of pages), or why there are none.
+ */
 export type ItemOutline =
-    | { state: "ok"; headings: OutlineHeading[] }
+    | {
+          state: "ok";
+          headings: OutlineHeading[];
+          pageLabels: string[];
+          pageCount: number;
+      }
     | { state: "none" }
     | { state: "not-here" };
 
@@ -114,7 +123,12 @@ async function read(libraryID: number, key: string): Promise<ItemOutline> {
                 if (label) h.label = label;
             }
         }
-        return { state: "ok", headings };
+        return {
+            state: "ok",
+            headings,
+            pageLabels: (labels ?? []).map((l) => String(l ?? "")),
+            pageCount: doc.numPages ?? labels?.length ?? 0,
+        };
     } finally {
         void doc.destroy();
     }

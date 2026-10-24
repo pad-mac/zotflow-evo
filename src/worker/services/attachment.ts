@@ -117,9 +117,11 @@ export class AttachmentService {
 
     /**
      * ZotFlow Evo: keep bytes this device rewrote and uploaded (PDF
-     * editing), so the reader opens them once the item's md5 (after the
-     * next sync) is theirs — even when files are read from Zotero's own
-     * storage folder, which Zotero brings up to date only with its own sync.
+     * editing), so the reader opens them — even when files are read from
+     * Zotero's own storage folder, which Zotero brings up to date only with
+     * its own sync. `replaces`: the md5 of the file they took the place of;
+     * until a sync brings the item's new md5, an item that still has that
+     * one opens these bytes (the reader need not wait for the sync).
      */
     async putEditedFile(
         libraryID: number,
@@ -128,6 +130,7 @@ export class AttachmentService {
         md5: string,
         fileName: string,
         mimeType = "application/pdf",
+        replaces: string | null = null,
     ): Promise<void> {
         await db.files.put({
             libraryID,
@@ -139,6 +142,7 @@ export class AttachmentService {
             size: buffer.byteLength,
             lastAccessedAt: new Date().toISOString(),
             evoEdited: true,
+            ...(replaces ? { evoReplaces: replaces } : {}),
         });
     }
 
@@ -321,14 +325,22 @@ export class AttachmentService {
             .map((e) => ({ name: e.name, size: e.size }));
     }
 
-    /** ZotFlow Evo: the rewritten copy of an item, if it is the item's current file. */
+    /**
+     * ZotFlow Evo: the rewritten copy of an item, if it is the item's
+     * current file: the item has its md5 (synced since), or still the md5
+     * of the file it replaced (not synced yet). Any other md5: the file was
+     * changed elsewhere after, and that one counts.
+     */
     private async editedCopy(
         item: IDBZoteroItem<AttachmentData>,
     ): Promise<IDBZoteroFile | undefined> {
         const md5 = item.raw.data.md5;
         if (!md5) return undefined;
         const cached = await db.files.get([item.libraryID, item.key]);
-        return cached?.evoEdited && cached.md5 === md5 ? cached : undefined;
+        if (!cached?.evoEdited) return undefined;
+        return cached.md5 === md5 || cached.evoReplaces === md5
+            ? cached
+            : undefined;
     }
 
     /**

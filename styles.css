@@ -4675,6 +4675,13 @@ body.zotflow-evo-col-resizing * {
     color: var(--text-error);
 }
 
+.zotflow-evo-fts-coverage {
+    padding: 2px 12px 4px;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
 .zotflow-evo-fts-snippet {
     margin: 0 4px 6px 0;
     padding: 4px 8px 4px 12px;
@@ -4820,6 +4827,46 @@ body.zotflow-evo-col-resizing * {
 
 .zotflow-evo-header-page-label {
     color: var(--text-normal);
+}
+
+/* Back to where the reader was before a jump: under the page in the
+   header, while the reader can go back (beta.16). */
+.zotflow-evo-has-back {
+    position: relative;
+}
+
+.zotflow-evo-header-back {
+    position: absolute;
+    top: var(--zf-back-top, 44px);
+    right: var(--zf-back-right, 120px);
+    z-index: 5;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 18px;
+    border-radius: var(--radius-s);
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0.85;
+    transition:
+        color 90ms ease-out,
+        background-color 90ms ease-out;
+}
+
+.zotflow-evo-header-back.is-shown {
+    display: flex;
+}
+
+.zotflow-evo-header-back:hover {
+    opacity: 1;
+    color: var(--text-muted);
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-evo-header-back svg {
+    width: 13px;
+    height: 13px;
 }
 
 /* Minimal's focus mode folds the view header away and fades its title and
@@ -4975,12 +5022,13 @@ body.minimal-focus-mode
     transition: opacity 140ms ease-out;
 }
 
+/* The outline button only while the pointer is over the pane, on or off
+   (its icon says which: beta.16); the edit button stays while editing. */
 .zotflow-evo-details:hover .zotflow-evo-details-edit,
 .zotflow-evo-details-edit:focus-visible,
 .zotflow-evo-details-edit.is-on,
 .zotflow-evo-details:hover .zotflow-evo-details-outline-toggle,
-.zotflow-evo-details-outline-toggle:focus-visible,
-.zotflow-evo-details-outline-toggle.is-on {
+.zotflow-evo-details-outline-toggle:focus-visible {
     opacity: 1;
     transition-duration: 90ms;
 }
@@ -5022,6 +5070,52 @@ body.minimal-focus-mode
 .zotflow-evo-details-heading-title {
     flex: 1 1 auto;
     min-width: 0;
+}
+
+/* The fold arrow before a heading with something under it, in the cards'
+   gutter (the titles line up with the cards' text). */
+.zotflow-evo-details-fold {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: var(--zotflow-evo-gutter, 16px);
+    align-self: center;
+    margin-inline-end: -8px;
+    color: var(--text-faint);
+    opacity: 0;
+    transition: opacity 140ms ease-out;
+}
+
+.zotflow-evo-details-fold svg {
+    width: 12px;
+    height: 12px;
+    transform: rotate(90deg);
+    transition: transform 120ms ease;
+}
+
+.zotflow-evo-details-heading.is-folded .zotflow-evo-details-fold svg {
+    transform: none;
+}
+
+.zotflow-evo-details-heading:hover .zotflow-evo-details-fold:not(.is-empty),
+.zotflow-evo-details-heading.is-folded .zotflow-evo-details-fold {
+    opacity: 1;
+    transition-duration: 90ms;
+}
+
+.zotflow-evo-details-fold:not(.is-empty):hover {
+    color: var(--text-normal);
+}
+
+/* Folded headings follow each other closely. */
+.zotflow-evo-details-heading.is-folded + .zotflow-evo-details-heading {
+    margin-top: 4px;
+}
+
+/* Above the outline: fold or unfold all headings. */
+.zotflow-evo-details-foldall {
+    margin-inline-start: auto;
 }
 
 /* The page: subdued, in figures of one width. */
@@ -5125,4 +5219,100 @@ body.minimal-focus-mode
 .zotflow-evo-items-block-error {
     color: var(--text-error);
     font-size: var(--font-ui-small);
+}
+
+/* ----- A book section from an outline heading (beta.16) ----- */
+
+/* Beside the heading, over everything, but no modal: the rest can be
+   clicked and scrolled while it is open. */
+.zotflow-evo-section-panel {
+    position: fixed;
+    top: var(--zf-section-top, 80px);
+    left: var(--zf-section-left, 80px);
+    z-index: var(--layer-menu, 65);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 320px;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    background-color: var(--background-primary);
+    box-shadow: var(--shadow-l, 0 8px 24px rgba(0, 0, 0, 0.18));
+    font-size: var(--font-ui-small);
+}
+
+.zotflow-evo-section-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+    cursor: grab;
+    user-select: none;
+}
+
+.zotflow-evo-section-panel-heading {
+    font-weight: var(--font-semibold, 600);
+}
+
+.zotflow-evo-section-panel-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-s);
+    color: var(--text-faint);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.zotflow-evo-section-panel-close:hover {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-hover);
+}
+
+.zotflow-evo-section-panel-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.zotflow-evo-section-panel-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.zotflow-evo-section-panel-input {
+    width: 100%;
+}
+
+.zotflow-evo-section-panel-pages {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+}
+
+.zotflow-evo-section-panel-page {
+    width: 72px;
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-section-panel-info {
+    min-height: 1.4em;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+}
+
+.zotflow-evo-section-panel-info.is-error {
+    color: var(--text-error);
+}
+
+.zotflow-evo-section-panel-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
 }

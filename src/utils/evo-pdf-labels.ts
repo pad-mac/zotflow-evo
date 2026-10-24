@@ -262,3 +262,42 @@ export function writeOutline(
     link(root);
     doc.catalog.set(PDFName.of("Outlines"), root.ref);
 }
+
+/**
+ * Set page labels from runs with any style and prefix (a book section's
+ * pages keep the labels they had in the book; see labelRuns() in
+ * utils/evo-book-section.ts). An empty list removes them.
+ */
+export function writeLabelRuns(
+    doc: PDFDocument,
+    runs: readonly {
+        start: number;
+        style: "D" | "r" | "R" | null;
+        first: number;
+        prefix: string;
+    }[],
+): void {
+    const count = doc.getPageCount();
+    const sorted = [...runs]
+        .filter((r) => Number.isInteger(r.start) && r.start >= 0 && r.start < count)
+        .sort((a, b) => a.start - b.start);
+    if (!sorted.length) {
+        doc.catalog.delete(PDFName.of("PageLabels"));
+        return;
+    }
+    const ctx = doc.context;
+    const nums: unknown[] = [];
+    if (sorted[0]!.start > 0) nums.push(0, ctx.obj({ S: PDFName.of("D") }));
+    for (const r of sorted) {
+        const dict = ctx.obj({});
+        if (r.style) dict.set(PDFName.of("S"), PDFName.of(r.style));
+        if (r.prefix) dict.set(PDFName.of("P"), PDFHexString.fromText(r.prefix));
+        if (r.style && r.first !== 1)
+            dict.set(PDFName.of("St"), PDFNumber.of(Math.max(1, Math.round(r.first))));
+        nums.push(r.start, dict);
+    }
+    doc.catalog.set(
+        PDFName.of("PageLabels"),
+        ctx.register(ctx.obj({ Nums: nums as never })),
+    );
+}
