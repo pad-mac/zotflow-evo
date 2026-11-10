@@ -1,6 +1,7 @@
 import { Liquid } from "liquidjs";
 import type { AnyIDBZoteroItem, IDBZoteroItem } from "types/db-schema";
 import { db, getCombinations } from "db/db";
+import { Zotero_Item_Types } from "types/zotero-item-const";
 import type {
     ItemTemplateContext,
     NoteTemplateContext,
@@ -609,6 +610,78 @@ export class LibraryTemplateService {
         await db.items.update([item.libraryID, item.key], { csljson });
         item.csljson = csljson;
         return item;
+    }
+
+    /**
+     * CSL-JSON for the items behind Pandoc citekeys, as other plugins cite them
+     * (`[@citekey]`): an item's `citationKey`, else its Zotero item key — the
+     * same rule the citation templates use. Each returned item's `id` is set to
+     * the citekey it was asked for. Items synced before csljson was pulled are
+     * backfilled once (network); a failure there lists the key as missing.
+     *
+     * Public through `plugin.api.getCslItems` (see `api.ts`).
+     */
+    async getCslItemsByCitekey(
+        citekeys: string[],
+    ): Promise<{ items: CSLItem[]; missing: string[] }> {
+        const wanted = new Set(citekeys.filter((k) => k.length > 0));
+        if (wanted.size === 0) return { items: [], missing: [] };
+
+        const libraryIDs = await this.dbHelper.getFilteredLibraryIDs();
+        const citableTypes = Zotero_Item_Types.filter(
+            (type) =>
+                !(["note", "annotation", "attachment"] as string[]).includes(
+                    type,
+                ),
+        );
+        const candidates = await db.items
+            .where(["libraryID", "itemType", "trashed"])
+            .anyOf(getCombinations([libraryIDs, citableTypes, [0]]))
+            .filter(
+                (item: AnyIDBZoteroItem) =>
+                    wanted.has(item.citationKey ?? "") || wanted.has(item.key),
+            )
+            .toArray();
+
+        // A citationKey match wins over another item whose Zotero key happens
+        // to equal the same string.
+        candidates.sort(
+            (a, b) =>
+                Number(wanted.has(b.citationKey ?? "")) -
+                Number(wanted.has(a.citationKey ?? "")),
+        );
+
+        const found = new Map<string, CSLItem>();
+        for (const candidate of candidates) {
+            const citekey =
+                candidate.citationKey && wanted.has(candidate.citationKey)
+                    ? candidate.citationKey
+                    : candidate.key;
+            if (found.has(citekey)) continue;
+            let item = candidate;
+            if (!item.csljson) {
+                try {
+                    item = await this.backfillCslJson(item);
+                } catch (e) {
+                    this.parentHost.log(
+                        "warn",
+                        `No citation data for ${citekey}`,
+                        "LibraryTemplateService",
+                        e,
+                    );
+                    continue;
+                }
+            }
+            found.set(citekey, {
+                ...(item.csljson as CSLItem),
+                id: citekey,
+            });
+        }
+
+        return {
+            items: [...found.values()],
+            missing: [...wanted].filter((k) => !found.has(k)),
+        };
     }
 
     updateSettings(newSettings: ZotFlowSettings) {

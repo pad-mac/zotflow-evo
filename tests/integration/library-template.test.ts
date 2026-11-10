@@ -1842,3 +1842,42 @@ describe("ZotFlow Evo: numbered citation footnotes (evoRenderNotes)", () => {
         expect(out).toEqual({ notes: [`note:${LIB}/ABCD2345`], missing: [] });
     });
 });
+
+describe("getCslItemsByCitekey (public API for other plugins)", () => {
+    // The shared fixture's key belongs to user 42; make LIB the key's own library
+    // so it counts as an active library.
+    beforeEach(async () => {
+        await db.keys.update(API_KEY, { userID: LIB });
+    });
+
+    test("resolves citation keys and Zotero keys, ids set to the citekey asked for", async () => {
+        await seedArticle("PARENT01"); // citationKey doe2020
+        await seedArticle("NOCKEY01", {});
+        await db.items.update([LIB, "NOCKEY01"], { citationKey: undefined });
+
+        const out = await service.getCslItemsByCitekey([
+            "doe2020",
+            "NOCKEY01",
+            "unknown1999",
+        ]);
+
+        expect(out.items.map((i) => i.id).sort()).toEqual(["NOCKEY01", "doe2020"]);
+        expect(out.items.find((i) => i.id === "doe2020")).toMatchObject({
+            type: "article-journal",
+            title: "A Study of Things",
+        });
+        expect(out.missing).toEqual(["unknown1999"]);
+    });
+
+    test("trashed items and notes are not citable", async () => {
+        await seedArticle("PARENT01");
+        await db.items.update([LIB, "PARENT01"], { trashed: 1 });
+
+        const out = await service.getCslItemsByCitekey(["doe2020"]);
+        expect(out).toEqual({ items: [], missing: ["doe2020"] });
+    });
+
+    test("an empty request touches nothing", async () => {
+        expect(await service.getCslItemsByCitekey([])).toEqual({ items: [], missing: [] });
+    });
+});
