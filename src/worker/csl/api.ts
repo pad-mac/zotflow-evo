@@ -182,13 +182,20 @@ export class CslRenderService {
 					if (p.label !== undefined) ci.label = p.label;
 					if (p.prefix !== undefined) ci.prefix = p.prefix;
 					if (p.suffix !== undefined) ci.suffix = p.suffix;
+					if (p.suppressAuthor) ci["suppress-author"] = true;
 					return ci;
 				}),
 				properties: { noteIndex: c.noteIndex },
 			}));
 			const out = host.engine.rebuildProcessorState(citations, format, []);
 			const byId = new Map(out.map(([id, , text]) => [id, text]));
-			return citations.map((c) => (byId.get(c.citationID) ?? "").trim());
+			// A note begins with a capital, as Pandoc writes one ("See …"
+			// from the prefix "see"); citeproc leaves a prefix as it is.
+			return citations.map((c) =>
+				(byId.get(c.citationID) ?? "")
+					.trim()
+					.replace(/^((?:<[^>]+>)*)(\p{Ll})/u, (_m, tags: string, ch: string) => tags + ch.toUpperCase())
+			);
 		} finally {
 			this.pool.release(host);
 		}

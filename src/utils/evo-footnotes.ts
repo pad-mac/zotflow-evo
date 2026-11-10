@@ -369,46 +369,191 @@ export interface ClusterItem {
     citekey: string;
     /** "45", "45–47"; "" for none. */
     locator: string;
+    /** The locator's CSL label ("page", "chapter", …); "page" when none is written. */
+    label: string;
     /** Text before it ("see", "cf."). */
     prefix: string;
+    /** Text after the locator, with its separator (", emphasis added"). */
+    suffix: string;
+    /** `-@key`: without the author's name. */
+    suppressAuthor?: boolean;
+}
+
+/** A citation of one work, without a locator: for building clusters. */
+export function clusterItem(citekey: string, locator?: Locator | null): ClusterItem {
+    return {
+        citekey,
+        locator: locator?.locator ?? "",
+        label: locator?.label ?? "page",
+        prefix: "",
+        suffix: "",
+    };
 }
 
 const CITEKEY =
     "[\\p{L}\\p{N}_](?:[\\p{L}\\p{N}_:.#$%&+?<>~/-]*[\\p{L}\\p{N}_])?";
 const ITEM_RE = new RegExp(
-    `^(?:(?<prefix>[^@;]*?)\\s+)?@(?<key>${CITEKEY})(?:\\s*,\\s*(?<locator>[^;]*?))?\\s*$`,
+    `^(?<prefix>[^@]*?)\\s*(?<suppress>-)?@(?<key>${CITEKEY})(?<rest>[^@]*)$`,
     "u",
 );
 
 /**
- * A definition's body as a citation cluster: works separated by ";", each
- * `[prefix] @key[, locator]` ("see @heims1991, 23; @gerhards"). Null when
- * the body is anything else (a footnote of one's own words).
+ * Pandoc's locator terms (its CSL locale's, short and long), with the CSL
+ * label each stands for; the first two are the forms written (singular,
+ * plural). German abbreviations are read too, and written as Pandoc's.
+ */
+const LOCATOR_TERMS: { label: string; write: [string, string]; read: string[] }[] = [
+    { label: "page", write: ["p.", "pp."], read: ["pages", "page", "pp.", "p.", "Seiten", "Seite", "S."] },
+    { label: "chapter", write: ["chap.", "chaps."], read: ["chapters", "chapter", "chaps.", "chap.", "ch.", "Kap."] },
+    { label: "section", write: ["sec.", "secs."], read: ["sections", "section", "secs.", "sec.", "§§", "§"] },
+    { label: "paragraph", write: ["para.", "paras."], read: ["paragraphs", "paragraph", "paras.", "para.", "¶¶", "¶", "Abs."] },
+    { label: "volume", write: ["vol.", "vols."], read: ["volumes", "volume", "vols.", "vol.", "Bd."] },
+    { label: "figure", write: ["fig.", "figs."], read: ["figures", "figure", "figs.", "fig.", "Abb."] },
+    { label: "note", write: ["n.", "nn."], read: ["notes", "note", "nn.", "n.", "Anm."] },
+    { label: "line", write: ["l.", "ll."], read: ["lines", "line", "ll.", "l.", "Z."] },
+    { label: "column", write: ["col.", "cols."], read: ["columns", "column", "cols.", "col.", "Sp."] },
+    { label: "folio", write: ["fol.", "fols."], read: ["folios", "folio", "fols.", "fol."] },
+    { label: "number", write: ["no.", "nos."], read: ["numbers", "number", "nos.", "no.", "Nr."] },
+    { label: "opus", write: ["op.", "opp."], read: ["opera", "opus", "opp.", "op."] },
+    { label: "part", write: ["pt.", "pts."], read: ["parts", "part", "pts.", "pt.", "Tl."] },
+    { label: "verse", write: ["v.", "vv."], read: ["verses", "verse", "vv.", "v."] },
+    { label: "book", write: ["bk.", "bks."], read: ["books", "book", "bks.", "bk."] },
+    { label: "sub-verbo", write: ["s.v.", "s.vv."], read: ["sub verbis", "sub verbo", "s.vv.", "s.v."] },
+];
+
+const TERM_RE = new RegExp(
+    `^(?<term>${LOCATOR_TERMS.flatMap((t) => t.read)
+        .sort((a, b) => b.length - a.length)
+        .map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + (/[a-z]$/i.test(r) ? "\\b" : ""))
+        .join("|")})\\s*`,
+    "iu",
+);
+const NUM = "[\\p{N}]+[a-z]?|[ivxlcdm]+\\b|[IVXLCDM]+\\b";
+const LOCATOR_VALUE_RE = new RegExp(
+    `^(?:${NUM})(?:\\s*[-–—]\\s*(?:${NUM}))?(?:\\s*,\\s*(?:${NUM})(?:\\s*[-–—]\\s*(?:${NUM}))?)*(?:\\s*ff?\\.)?`,
+    "u",
+);
+
+/** A locator: the CSL label and what follows it ("page", "23–25"). */
+export interface Locator {
+    label: string;
+    locator: string;
+}
+
+/**
+ * A locator and what comes after it, as Pandoc reads one: a term (or none:
+ * a page) and numbers ("p. 23", "pp. 23–25, 30", "chap. 3", "23ff."); the
+ * rest is the suffix, with its own separator (", emphasis added", " and
+ * passim"), as CSL takes it. Null locator when there is none: all of it is
+ * the suffix.
+ */
+export function parseLocator(
+    text: string,
+    /** Typed where a page is asked for: a Roman numeral is a page too. */
+    opts: { asked?: boolean } = {},
+): { locator: Locator | null; suffix: string } {
+    let rest = text.trim();
+    let label = "page";
+    let termed = false;
+    const t = TERM_RE.exec(rest);
+    if (t?.groups) {
+        const term = t.groups.term!;
+        const found = LOCATOR_TERMS.find((x) => x.read.some((r) => r.toLowerCase() === term.toLowerCase() && (r === "S." ? term === "S." : true)));
+        if (found) {
+            label = found.label;
+            termed = true;
+            rest = rest.slice(t[0].length);
+        }
+    }
+    const v = LOCATOR_VALUE_RE.exec(rest);
+    // Without a term only numbers make a locator ("emphasis added" is not one).
+    if (!v || (!termed && !opts.asked && !/^[\p{N}]/u.test(rest))) {
+        return termed
+            ? { locator: { label, locator: rest.trim() }, suffix: "" }
+            : { locator: null, suffix: text.trim() ? `, ${text.trim()}` : "" };
+    }
+    const locator = v[0].trim();
+    const after = rest.slice(v[0].length);
+    const tail = after.trim();
+    const suffix = !tail ? "" : /^\s*,/.test(after) ? `, ${tail.replace(/^,\s*/, "")}` : ` ${tail}`;
+    return { locator: { label, locator }, suffix };
+}
+
+/** The term written before a locator: Pandoc's short form ("p.", "pp."). */
+export function locatorTerm(label: string, locator: string): string {
+    const t = LOCATOR_TERMS.find((x) => x.label === label) ?? LOCATOR_TERMS[0]!;
+    const plural = /[-–—,&]|\band\b|ff?\.$/.test(locator);
+    return t.write[plural ? 1 : 0];
+}
+
+function parseItem(part: string): ClusterItem | null {
+    const m = ITEM_RE.exec(part.trim());
+    if (!m?.groups) return null;
+    const rest = m.groups.rest!.trim();
+    let locator: Locator | null = null;
+    let suffix = "";
+    if (rest) {
+        // After the key only ", locator, suffix" (else it is a sentence).
+        if (!rest.startsWith(",")) return null;
+        ({ locator, suffix } = parseLocator(rest.slice(1)));
+    }
+    return {
+        citekey: m.groups.key!,
+        locator: locator?.locator ?? "",
+        label: locator?.label ?? "page",
+        prefix: m.groups.prefix!.trim(),
+        suffix,
+        ...(m.groups.suppress ? { suppressAuthor: true } : {}),
+    };
+}
+
+/**
+ * A definition's body as a citation cluster, in Pandoc's form —
+ * `[see @heims1991, p. 23; @gerhards, pp. 7–9]` — or the bare one beta.17 to
+ * beta.20 wrote (`@heims1991, 23; @gerhards`). Null when the body is
+ * anything else (a footnote of one's own words).
  */
 export function parseCluster(body: string): ClusterItem[] | null {
-    const text = body.trim().replace(/\.$/, "");
+    let text = body.trim();
     if (!text.includes("@") || text.includes("\n")) return null;
+    const bracketed = /^\[([^[\]]*)\]\.?$/.exec(text);
+    if (bracketed) text = bracketed[1]!;
+    else if (/[[\]]/.test(text)) return null;
+    else text = text.replace(/\.$/, "");
     const items: ClusterItem[] = [];
     for (const part of text.split(";")) {
-        const m = ITEM_RE.exec(part.trim());
-        if (!m?.groups) return null;
-        items.push({
-            citekey: m.groups.key!,
-            locator: (m.groups.locator ?? "").replace(/^(?:pp?\.|S\.)\s*/i, "").trim(),
-            prefix: (m.groups.prefix ?? "").trim(),
-        });
+        const item = parseItem(part);
+        if (!item) return null;
+        items.push(item);
     }
     return items.length ? items : null;
 }
 
-/** A cluster written back as a body. */
+/** One work as Pandoc writes it: `see @key, p. 23, suffix`. */
+export function formatItem(i: ClusterItem): string {
+    const loc = i.locator ? `, ${locatorTerm(i.label, i.locator)} ${i.locator}` : "";
+    return `${i.prefix ? `${i.prefix} ` : ""}${i.suppressAuthor ? "-" : ""}@${i.citekey}${loc}${i.suffix}`;
+}
+
+/** A cluster written back as a body: Pandoc's citation, `[@a, p. 2; @b]`. */
 export function formatCluster(items: readonly ClusterItem[]): string {
-    return items
-        .map(
-            (i) =>
-                `${i.prefix ? `${i.prefix} ` : ""}@${i.citekey}${i.locator ? `, ${i.locator}` : ""}`,
-        )
-        .join("; ");
+    return `[${items.map(formatItem).join("; ")}]`;
+}
+
+/**
+ * Citation footnotes still in the bare form (`@key, 23`, beta.17 to
+ * beta.20) rewritten in Pandoc's (`[@key, p. 23]`); those in brackets
+ * already are left as written.
+ */
+export function pandocCitationChanges(text: string): TextChange[] {
+    const changes: TextChange[] = [];
+    for (const d of scanFootnotes(text).defs) {
+        const body = text.slice(d.bodyFrom, d.to);
+        if (body.trimStart().startsWith("[")) continue;
+        const items = parseCluster(body);
+        if (items) changes.push({ from: d.bodyFrom, to: d.to, insert: formatCluster(items) });
+    }
+    return changes;
 }
 
 /* ------------------------------ copy, paste ----------------------------- */

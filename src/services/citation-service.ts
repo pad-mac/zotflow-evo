@@ -4,6 +4,7 @@ import { services } from "./services";
 import type { AnyIDBZoteroItem } from "types/db-schema";
 import type { CitationFormat } from "settings/types";
 import type { AnnotationJSON } from "types/zotero-reader";
+import { clusterItem, formatCluster, locatorTerm, type ClusterItem, type Locator } from "utils/evo-footnotes";
 
 /**
  * Release note explaining the footnote definition template redesign.
@@ -27,10 +28,26 @@ export interface CitationResult {
     /** Footnote definition line (only for footnote format). */
     footnoteDef?: string;
     /**
-     * ZotFlow Evo: a numbered citation footnote (`[^n]: @key, page`): what
-     * it cites, so the picker can add it to the footnote before the cursor.
+     * ZotFlow Evo: a numbered citation footnote (`[^n]: [@key, p. 23]`):
+     * the work it cites, so the picker can add it to the footnote before
+     * the cursor.
      */
-    evoCite?: { citekey: string; locator: string };
+    evoCite?: ClusterItem;
+}
+
+/**
+ * ZotFlow Evo: where in the work (the picker's page step): Pandoc's
+ * locator and what follows it.
+ */
+export interface CitationPlace {
+    locator: Locator | null;
+    suffix: string;
+}
+
+/** The formats a page can go with (the picker asks for one). */
+export function takesPlace(format: CitationFormat): boolean {
+    if (format === "footnote") return services.settings.evoFootnotes;
+    return format === "pandoc" || format === "citekey";
 }
 
 /** Minimal reference to a Zotero item for citation resolution. */
@@ -51,6 +68,7 @@ export class CitationService {
     async resolve(
         ref: CitationRef,
         format: CitationFormat,
+        place?: CitationPlace,
     ): Promise<CitationResult | null> {
         const item = await workerBridge.dbHelper.getItem(
             ref.libraryID,
@@ -88,13 +106,13 @@ export class CitationService {
         try {
             switch (format) {
                 case "pandoc":
-                    return await this.pandoc(input, notePath);
+                    return await this.pandoc(input, notePath, place);
                 case "wikilink":
                     return await this.wikilink(input, notePath);
                 case "footnote":
-                    return await this.footnote(input, notePath);
+                    return await this.footnote(input, notePath, place);
                 case "citekey":
-                    return this.citekey(input);
+                    return this.citekey(input, place);
             }
         } catch (error) {
             services.logService.error(
@@ -110,8 +128,16 @@ export class CitationService {
     private async pandoc(
         input: CitationTemplateInput,
         notePath: string,
+        place?: CitationPlace,
     ): Promise<CitationResult> {
         const citekey = input.item.citationKey || input.item.key;
+        // A page given (the picker): Pandoc's citation with it.
+        if (place?.locator || place?.suffix) {
+            return {
+                citation: formatCluster([{ ...clusterItem(citekey, place.locator), suffix: place.suffix }]),
+                citekey,
+            };
+        }
         const rendered =
             await workerBridge.libraryTemplate.renderCitationTemplate(
                 input,
@@ -126,10 +152,14 @@ export class CitationService {
         return { citation: `[@${citekey}]`, citekey };
     }
 
-    /** `@citekey` — raw citation key only. */
-    private citekey(input: CitationTemplateInput): CitationResult {
+    /** `@citekey` — raw citation key only (Pandoc's `@key [p. 23]` with a page). */
+    private citekey(input: CitationTemplateInput, place?: CitationPlace): CitationResult {
         const citekey = input.item.citationKey || input.item.key;
-        return { citation: `@${citekey}`, citekey };
+        const loc = place?.locator
+            ? `${locatorTerm(place.locator.label, place.locator.locator)} ${place.locator.locator}`
+            : "";
+        const where = `${loc}${place?.suffix ?? ""}`.replace(/^,\s*/, "");
+        return { citation: where ? `@${citekey} [${where}]` : `@${citekey}`, citekey };
     }
 
     /** Wikilink: template-rendered or `generateMarkdownLink` fallback. */
@@ -181,12 +211,14 @@ export class CitationService {
     private async footnote(
         input: CitationTemplateInput,
         notePath: string,
+        place?: CitationPlace,
     ): Promise<CitationResult> {
         const citekey = input.item.citationKey || input.item.key;
 
-        // ZotFlow Evo: numbered footnotes — the definition is the citation
-        // (`@key, page`), shown as the formatted note; the label is numbered
-        // when it goes in (ui/editor/evo-footnotes.ts).
+        // ZotFlow Evo: numbered footnotes — the definition is Pandoc's
+        // citation (`[@key, p. 23]`), shown as the formatted note; the label
+        // is numbered when it goes in (ui/editor/evo-footnotes.ts). The page:
+        // the one given (the picker), else the annotations' pages.
         if (services.settings.evoFootnotes) {
             const pages = [
                 ...new Set(
@@ -195,13 +227,15 @@ export class CitationService {
                         .filter((p): p is string => !!p),
                 ),
             ];
-            const locator = pages.join(", ");
+            const locator: Locator | null =
+                place?.locator ?? (pages.length ? { label: "page", locator: pages.join(", ") } : null);
+            const cite = { ...clusterItem(citekey, locator), suffix: place?.suffix ?? "" };
             const label = `zfc${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
             return {
                 citation: `[^${label}]`,
                 citekey,
-                footnoteDef: `[^${label}]: @${citekey}${locator ? `, ${locator}` : ""}`,
-                evoCite: { citekey, locator },
+                footnoteDef: `[^${label}]: ${formatCluster([cite])}`,
+                evoCite: cite,
             };
         }
 

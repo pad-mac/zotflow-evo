@@ -139,3 +139,57 @@ export function parseLinktext(linktext: string): { path: string; subpath: string
         ? { path: linktext, subpath: "" }
         : { path: linktext.slice(0, at), subpath: linktext.slice(at) };
 }
+
+/** ZotFlow Evo: `setIcon` — nothing drawn. */
+export function setIcon(): void {}
+
+/** ZotFlow Evo: a markdown view — only a type to look for. */
+export class MarkdownView {}
+
+/**
+ * ZotFlow Evo: Obsidian's `EditorSuggest`, as far as a picker test needs:
+ * `trigger()` as Obsidian's own (app.js: no trigger with a selection; the
+ * context from `onTrigger`; suggestions fetched when open or forced),
+ * `isOpen`, and what was shown (`shown`).
+ */
+type StubPos = { line: number; ch: number };
+type StubEditor = { getCursor(which?: string): StubPos };
+export class EditorSuggest<T> {
+    context: { editor: StubEditor; file: unknown; start: StubPos; end: StubPos; query: string } | null = null;
+    limit = 0;
+    isOpen = false;
+    shown: T[] = [];
+    constructor(public app: unknown) {}
+    onTrigger(_c: StubPos, _e: StubEditor, _f: unknown): { start: StubPos; end: StubPos; query: string } | null {
+        return null;
+    }
+    getSuggestions(_c: unknown): T[] | Promise<T[]> {
+        return [];
+    }
+    setInstructions(): void {}
+    trigger(editor: StubEditor, file: unknown, open: boolean): boolean | Promise<boolean> {
+        const from = editor.getCursor("from");
+        const to = editor.getCursor("to");
+        if (from.line !== to.line || from.ch !== to.ch) {
+            this.context = null;
+            return false;
+        }
+        const info = this.onTrigger(from, editor, file);
+        if (!info) {
+            this.context = null;
+            return false;
+        }
+        const context = (this.context = { editor, file, ...info });
+        if (open || this.isOpen) {
+            return Promise.resolve(this.getSuggestions(context)).then((list) => {
+                this.shown = list;
+                this.isOpen = list.length > 0;
+                return true;
+            });
+        }
+        return true;
+    }
+    close(): void {
+        this.isOpen = false;
+    }
+}

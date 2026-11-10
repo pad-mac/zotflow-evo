@@ -273,8 +273,9 @@ export function handleEditorDrop(
 }
 
 /**
- * ZotFlow Evo: a citation footnote. Right after a footnote that cites
- * (`[^3]` and the cursor), the work joins it (`; @key`: one footnote,
+ * ZotFlow Evo: a citation footnote, its definition Pandoc's citation
+ * (`[^n]: [@key, p. 23]`). Right after a footnote that cites (`[^3]` and
+ * the cursor), the work joins it (`[@a, p. 2; @key, p. 23]`: one footnote,
  * several works); else a new footnote — reference and definition in one
  * step, numbered and placed by the editor (ui/editor/evo-footnotes.ts).
  */
@@ -291,10 +292,8 @@ function insertNumberedCitation(
         const def = scanFootnotes(text).defs.find((d) => d.label === before[1]);
         const items = def ? parseCluster(def.body) : null;
         if (def && items && !items.some((i) => i.citekey === cite.citekey)) {
-            const added = formatCluster([
-                ...items,
-                { citekey: cite.citekey, locator: cite.locator, prefix: "" },
-            ]);
+            // Written in Pandoc's form, the works before it too.
+            const added = formatCluster([...items, cite]);
             editor.transaction({
                 changes: [
                     {

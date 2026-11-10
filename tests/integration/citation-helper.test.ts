@@ -27,6 +27,7 @@ import {
     stripAnnotationForPayload,
     ZOTFLOW_CITATION_MIME,
 } from "ui/editor/citation-helper";
+import { clusterItem, formatCluster } from "utils/evo-footnotes";
 
 import type { AnnotationJSON } from "types/zotero-reader";
 
@@ -658,34 +659,41 @@ describe("handleEditorDrop", () => {
 });
 
 describe("ZotFlow Evo: numbered citation footnotes", () => {
-    const cite = (label: string, citekey: string, locator: string) => ({
-        citation: `[^${label}]`,
-        citekey,
-        footnoteDef: `[^${label}]: @${citekey}${locator ? `, ${locator}` : ""}`,
-        evoCite: { citekey, locator },
-    });
+    const cite = (label: string, citekey: string, locator: string) => {
+        const item = clusterItem(citekey, locator ? { label: "page", locator } : null);
+        return {
+            citation: `[^${label}]`,
+            citekey,
+            footnoteDef: `[^${label}]: ${formatCluster([item])}`,
+            evoCite: item,
+        };
+    };
 
     it("the reference at the cursor, its definition at the end, in one step", () => {
         const editor = createEditor("Text here.");
         insertCitationResult(editor, { line: 0, ch: 4 }, cite("zfc1", "smith2024", "13"));
-        expect(editor.doc).toBe("Text[^zfc1] here.\n\n[^zfc1]: @smith2024, 13\n");
+        expect(editor.doc).toBe("Text[^zfc1] here.\n\n[^zfc1]: [@smith2024, p. 13]\n");
         expect(editor.cursor).toEqual({ line: 0, ch: 11 });
     });
 
     it("right after a citation footnote: the work is added to it (one number, several works)", () => {
-        const editor = createEditor("Text[^1] here.\n\n[^1]: @heims1991, 23\n");
+        const editor = createEditor("Text[^1] here.\n\n[^1]: [see @heims1991, p. 23]\n");
         insertCitationResult(editor, { line: 0, ch: 8 }, cite("zfc2", "smith2024", "13"));
-        expect(editor.doc).toBe("Text[^1] here.\n\n[^1]: @heims1991, 23; @smith2024, 13\n");
+        expect(editor.doc).toBe("Text[^1] here.\n\n[^1]: [see @heims1991, p. 23; @smith2024, p. 13]\n");
+        // One in the bare form of beta.17 to 20: the whole note written in Pandoc's.
+        const old = createEditor("Text[^1] here.\n\n[^1]: @heims1991, 23\n");
+        insertCitationResult(old, { line: 0, ch: 8 }, cite("zfc3", "smith2024", ""));
+        expect(old.doc).toBe("Text[^1] here.\n\n[^1]: [@heims1991, p. 23; @smith2024]\n");
         expect(editor.cursor).toEqual({ line: 0, ch: 8 });
     });
 
     it("after a footnote of one's own, or one citing the same work: a footnote of its own", () => {
         const own = createEditor("Text[^1] here.\n\n[^1]: My remark.\n");
         insertCitationResult(own, { line: 0, ch: 8 }, cite("zfc3", "smith2024", ""));
-        expect(own.doc).toBe("Text[^1][^zfc3] here.\n\n[^1]: My remark.\n\n\n[^zfc3]: @smith2024\n");
-        const same = createEditor("Text[^1] here.\n\n[^1]: @smith2024, 2\n");
+        expect(own.doc).toBe("Text[^1][^zfc3] here.\n\n[^1]: My remark.\n\n\n[^zfc3]: [@smith2024]\n");
+        const same = createEditor("Text[^1] here.\n\n[^1]: [@smith2024, p. 2]\n");
         insertCitationResult(same, { line: 0, ch: 8 }, cite("zfc4", "smith2024", "3"));
         expect(same.doc).toContain("Text[^1][^zfc4] here.");
-        expect(same.doc).toContain("[^1]: @smith2024, 2\n");
+        expect(same.doc).toContain("[^1]: [@smith2024, p. 2]\n");
     });
 });

@@ -17,7 +17,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CitationService } from "services/citation-service";
+import { CitationService, takesPlace } from "services/citation-service";
 
 import { createFakeApp } from "../fakes/obsidian-app";
 
@@ -445,7 +445,7 @@ describe("ZotFlow Evo: numbered footnotes", () => {
         state.evoFootnotes = true;
     });
 
-    it("a footnote whose definition is the citation: key and pages, no template", async () => {
+    it("a footnote whose definition is Pandoc's citation: key and the annotations' pages, no template", async () => {
         const result = await service.resolve(
             ref([
                 { id: "A1", pageLabel: "13" },
@@ -457,16 +457,43 @@ describe("ZotFlow Evo: numbered footnotes", () => {
         );
         const label = /^\[\^(zfc[a-z0-9]+)\]$/.exec(result!.citation)?.[1];
         expect(label).toBeDefined();
-        expect(result!.footnoteDef).toBe(`[^${label}]: @smith2024, 13, 14`);
-        expect(result!.evoCite).toEqual({ citekey: "smith2024", locator: "13, 14" });
+        expect(result!.footnoteDef).toBe(`[^${label}]: [@smith2024, pp. 13, 14]`);
+        expect(result!.evoCite).toEqual({
+            citekey: "smith2024",
+            locator: "13, 14",
+            label: "page",
+            prefix: "",
+            suffix: "",
+        });
         expect(state.renderCalls).toEqual([]);
     });
 
-    it("without pages, and without a citekey (the item key)", async () => {
+    it("the page given in the picker; without one and without a citekey (the item key)", async () => {
+        const result = await service.resolve(ref(), "footnote", {
+            locator: { label: "chapter", locator: "3" },
+            suffix: ", emphasis added",
+        });
+        expect(result!.footnoteDef).toMatch(/^\[\^zfc[a-z0-9]+\]: \[@smith2024, chap\. 3, emphasis added\]$/);
         state.item = item({ citationKey: "" });
-        const result = await service.resolve(ref(), "footnote");
-        expect(result!.footnoteDef).toMatch(new RegExp(`^\\[\\^zfc[a-z0-9]+\\]: @${KEY}$`));
-        expect(result!.evoCite).toEqual({ citekey: KEY, locator: "" });
+        const bare = await service.resolve(ref(), "footnote", { locator: null, suffix: "" });
+        expect(bare!.footnoteDef).toMatch(new RegExp(`^\\[\\^zfc[a-z0-9]+\\]: \\[@${KEY}\\]$`));
+    });
+
+    it("Pandoc's other forms with a page: [@key, p. 23] and @key [p. 23]; without one as before", async () => {
+        const place = { locator: { label: "page", locator: "23–25" }, suffix: "" };
+        expect((await service.resolve(ref(), "pandoc", place))!.citation).toBe("[@smith2024, pp. 23–25]");
+        expect((await service.resolve(ref(), "citekey", place))!.citation).toBe("@smith2024 [pp. 23–25]");
+        expect((await service.resolve(ref(), "citekey"))!.citation).toBe("@smith2024");
+    });
+
+    it("the formats a page goes with", () => {
+        expect(takesPlace("footnote")).toBe(true);
+        expect(takesPlace("pandoc")).toBe(true);
+        expect(takesPlace("citekey")).toBe(true);
+        expect(takesPlace("wikilink")).toBe(false);
+        state.evoFootnotes = false;
+        // Upstream's template footnotes: their template decides.
+        expect(takesPlace("footnote")).toBe(false);
     });
 
     it("two footnotes inserted quickly get labels of their own", async () => {

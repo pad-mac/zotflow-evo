@@ -357,7 +357,7 @@ export class EvoSection {
                 items: [
                     {
                         name: "Numbered footnotes",
-                        desc: "Footnotes are [^1], [^2], … in the order they stand, kept so as you write (inserting, deleting, moving and pasting renumber them; one undo takes back an edit with its renumbering). Each part's footnotes stand at its end, shown as notes; a footnote whose text is citations (@key, page; @key) shows the formatted note. Citation footnotes from the picker (Ctrl/Cmd+Enter, or Enter when footnotes are the default) right after a footnote join it. Commands: Insert footnote, Renumber footnotes. ZotFlow's source notes are left alone.",
+                        desc: "Footnotes are [^1], [^2], … in the order they stand, kept so as you write (inserting, deleting, moving and pasting renumber them; one undo takes back an edit with its renumbering). Each part's footnotes stand at its end, shown as notes; a footnote whose text is Pandoc's citation ([@key, p. 23; @key]) shows the formatted note. A citation footnote from the picker right after a footnote that cites joins it. Commands: Insert footnote, Renumber footnotes (it also writes footnotes of the earlier form, @key, 23, as Pandoc's). ZotFlow's source notes are left alone.",
                         control: { type: "toggle", key: "evoFootnotes" },
                     },
                     {

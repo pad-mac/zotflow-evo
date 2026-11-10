@@ -40,65 +40,59 @@
     text-overflow: ellipsis;
 }
 
-/* DOWN: Meta and Paths */
+/* DOWN: author (year) and collections — one line, every row as high as
+   the others (a long one ends in "…"). */
 .zotflow-row-bottom {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     font-size: var(--font-ui-smaller);
+    line-height: var(--line-height-tight);
     color: var(--text-muted);
     width: 100%;
-    gap: 8px;
-}
-
-/* Down-Left: Meta info (Author • Year) */
-.zotflow-meta {
-    flex-shrink: 1;
     min-width: 0;
+    gap: var(--size-4-3);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
-/* Down-Right: Path pills */
-.zotflow-paths {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 4px;
-    flex-shrink: 0;
-    /* On a narrow (phone) screen the pills wrap and end in "…" rather than
-       running off the edge; the author and year keep the rest of the row. */
+/* Author (year) */
+.zotflow-meta {
+    flex: 0 1 auto;
+    min-width: 0;
     max-width: 60%;
-    align-items: center;
-}
-
-/* Individual path pill */
-.zotflow-path-pill {
-    /* Inline-block, not flex, so a path too long for the row ends in "…". */
-    display: inline-block;
-    font-size: var(--font-ui-smaller);
-    padding: var(--size-2-1) var(--size-4-1);
-    border-radius: var(--radius-s);
-    white-space: nowrap;
-    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-    background-color: var(--tag-background);
-    border: var(--tag-border-width) solid var(--tag-border-color);
-    color: var(--tag-color);
 }
 
-/* The "/" separator inside a pill */
-.zotflow-path-pill .path-sep {
-    margin: 0 2px;
+/* Collections, as in the library's item pane: the library icon and the
+   collections' own names. */
+.zotflow-suggest-colls {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    gap: var(--size-2-2);
+    min-width: 0;
+    color: var(--text-faint);
 }
 
-/* .zotflow-path-pill .path-sep {
-    opacity: 0.4;
-    font-size: 0.85em;
-    margin: 0 1px;
-} */
+.zotflow-suggest-colls-icon {
+    display: flex;
+    flex-shrink: 0;
+}
+
+.zotflow-suggest-colls-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.zotflow-suggest-colls-names {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.zotflow-suggest-coll + .zotflow-suggest-coll {
+    margin-inline-start: 10px;
+}
 
 /* Group label ("Best Match", …): drawn above a group's first row, not a row */
 .zotflow-suggestion-group-label {

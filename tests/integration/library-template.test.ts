@@ -1833,6 +1833,42 @@ describe("ZotFlow Evo: numbered citation footnotes (evoRenderNotes)", () => {
         ]);
     });
 
+    test("Pandoc's locator terms, words after, -@ passed on to citeproc", async () => {
+        await seedArticle();
+        await service.evoRenderNotes(
+            [
+                {
+                    noteIndex: 1,
+                    items: [
+                        {
+                            citekey: "doe2020",
+                            locator: "3",
+                            label: "chapter",
+                            prefix: "",
+                            suffix: ", emphasis added",
+                            suppressAuthor: true,
+                        },
+                    ],
+                },
+            ],
+            { styleId: "chicago-notes-bibliography" },
+        );
+        expect(cslCalls[0]!.clusters).toEqual([
+            {
+                noteIndex: 1,
+                items: [
+                    {
+                        id: `${LIB}/PARENT01`,
+                        locator: "3",
+                        label: "chapter",
+                        suffix: ", emphasis added",
+                        suppressAuthor: true,
+                    },
+                ],
+            },
+        ]);
+    });
+
     test("a Zotero item key works as a citekey too", async () => {
         await seedArticle("ABCD2345");
         const out = await service.evoRenderNotes(

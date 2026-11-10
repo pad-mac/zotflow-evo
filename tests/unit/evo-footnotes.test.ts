@@ -12,7 +12,9 @@ import {
     editingMarker,
     formatCluster,
     normalizeFootnotes,
+    pandocCitationChanges,
     parseCluster,
+    parseLocator,
     preparePaste,
     refLabels,
     scanFootnotes,
@@ -149,31 +151,90 @@ describe("what is not text", () => {
     });
 });
 
-describe("citation clusters", () => {
-    it("works separated by semicolons, with pages and words before", () => {
-        expect(parseCluster("@heims1991")).toEqual([{ citekey: "heims1991", locator: "", prefix: "" }]);
-        expect(parseCluster("see @heims1991, 23–25; @gerhards:2004, p. 7.")).toEqual([
-            { citekey: "heims1991", locator: "23–25", prefix: "see" },
-            { citekey: "gerhards:2004", locator: "7", prefix: "" },
+describe("citation clusters: Pandoc's citations", () => {
+    const show = (body: string) => {
+        const c = parseCluster(body);
+        return c ? formatCluster(c) : null;
+    };
+
+    it("works separated by semicolons, with locators, words before and after", () => {
+        expect(parseCluster("[see @heims1991, pp. 23–25; also @hayles1999, chap. 2]")).toEqual([
+            { citekey: "heims1991", locator: "23–25", label: "page", prefix: "see", suffix: "" },
+            { citekey: "hayles1999", locator: "2", label: "chapter", prefix: "also", suffix: "" },
         ]);
-        expect(parseCluster("@Müller_2020, S. 12")).toEqual([{ citekey: "Müller_2020", locator: "12", prefix: "" }]);
+        expect(parseCluster("[@a, p. 33, emphasis added]")).toEqual([
+            { citekey: "a", locator: "33", label: "page", prefix: "", suffix: ", emphasis added" },
+        ]);
+        expect(parseCluster("[-@smith04, p. 44]")![0]).toMatchObject({ citekey: "smith04", suppressAuthor: true });
+        // As written: unchanged.
+        for (const b of [
+            "[@heims1991, p. 23]",
+            "[@a; @b]",
+            "[see @heims1991, pp. 23–25; also @hayles1999, chap. 2]",
+            "[@doe99, pp. 33-35, 38-39 and *passim*]",
+            "[@a, p. 33, emphasis added]",
+            "[-@smith04, p. 44]",
+            '[@a, s.v. "Engel"]',
+            "[@a, emphasis added]",
+        ])
+            expect(show(b)).toBe(b);
+    });
+
+    it("written with Pandoc's terms: p. for a page, pp. for more; other terms and German read too", () => {
+        expect(show("[@a, 23]")).toBe("[@a, p. 23]");
+        expect(show("[@a, 23-25]")).toBe("[@a, pp. 23-25]");
+        expect(show("[@a, Page 5]")).toBe("[@a, p. 5]");
+        expect(show("[@a, S. 12]")).toBe("[@a, p. 12]");
+        expect(show("[@a, Kap. 3]")).toBe("[@a, chap. 3]");
+        expect(show("[@a, 23ff.]")).toBe("[@a, pp. 23ff.]");
+        expect(show("[@a, §§ 4–6]")).toBe("[@a, secs. 4–6]");
+    });
+
+    it("the bare form of beta.17 to 20 read too, and rewritten in Pandoc's", () => {
+        expect(show("@heims1991")).toBe("[@heims1991]");
+        expect(show("see @heims1991, 23–25; @gerhards:2004, p. 7.")).toBe(
+            "[see @heims1991, pp. 23–25; @gerhards:2004, p. 7]",
+        );
+        expect(show("@Müller_2020, S. 12")).toBe("[@Müller_2020, p. 12]");
+        const note = "A[^1] B[^2]\n\n[^1]: @heims1991, 23\n[^2]: [@hayles1999, page 7]\n";
+        // Only the bare one: Pandoc's are left as written.
+        expect(applyChanges(note, pandocCitationChanges(note))).toBe(
+            "A[^1] B[^2]\n\n[^1]: [@heims1991, p. 23]\n[^2]: [@hayles1999, page 7]\n",
+        );
+    });
+
+    it("anything else is a footnote of one's own", () => {
         expect(parseCluster("My own remark about @heims1991 and more")).toBeNull();
+        expect(parseCluster("See [@a, p. 2] for details.")).toBeNull();
         expect(parseCluster("A plain remark.")).toBeNull();
-        expect(formatCluster(parseCluster("see @a, 2; @b")!)).toBe("see @a, 2; @b");
+        expect(parseCluster("[@a, p. 2]\n[@b]")).toBeNull();
+    });
+
+    it("a page typed in the picker", () => {
+        expect(parseLocator("23", { asked: true })).toEqual({ locator: { label: "page", locator: "23" }, suffix: "" });
+        expect(parseLocator("pp. 23–25", { asked: true }).locator).toEqual({ label: "page", locator: "23–25" });
+        expect(parseLocator("chap. 3", { asked: true }).locator).toEqual({ label: "chapter", locator: "3" });
+        expect(parseLocator("xiv", { asked: true }).locator).toEqual({ label: "page", locator: "xiv" });
+        expect(parseLocator("12, Anm. 3", { asked: true })).toEqual({
+            locator: { label: "page", locator: "12" },
+            suffix: ", Anm. 3",
+        });
+        // In a footnote a word is a suffix, not a page (as Pandoc reads it).
+        expect(parseLocator("xiv")).toEqual({ locator: null, suffix: ", xiv" });
     });
 });
 
 describe("copy and paste", () => {
     it("pasted references get labels of their own; definitions in the text or copied along come out", () => {
-        const { body, defs } = preparePaste("Moved[^3] text[^4].\n\n[^4]: four\n", new Map([["3", "@heims1991"]]));
+        const { body, defs } = preparePaste("Moved[^3] text[^4].\n\n[^4]: four\n", new Map([["3", "[@heims1991]"]]));
         const labels = refLabels(body);
         expect(labels).toHaveLength(2);
         expect(labels.every((l) => l.startsWith("zfp"))).toBe(true);
         expect(body.startsWith(`Moved[^${labels[0]}] text[^${labels[1]}].`)).toBe(true);
-        expect(defs).toEqual([`[^${labels[0]}]: @heims1991`, `[^${labels[1]}]: four`]);
+        expect(defs).toEqual([`[^${labels[0]}]: [@heims1991]`, `[^${labels[1]}]: four`]);
         // Into a note with footnotes of its own: they stay apart.
         const note = `Before[^1] ${body}\n\n[^1]: mine\n${defs.join("\n")}\n`;
-        expect(norm(note)).toBe("Before[^1] Moved[^2] text[^3].\n\n[^1]: mine\n[^2]: @heims1991\n[^3]: four\n");
+        expect(norm(note)).toBe("Before[^1] Moved[^2] text[^3].\n\n[^1]: mine\n[^2]: [@heims1991]\n[^3]: four\n");
     });
 
     it("writing a marker: wait", () => {

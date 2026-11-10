@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import { workerBridge } from "bridge";
 import { services } from "services/services";
 import { parseSearchQuery, splitHighlight } from "utils/search-query";
@@ -204,21 +205,25 @@ export class ZoteroItemSuggest {
 
         this.renderHighlight(metaEl, metaText, query);
 
-        // Path pills
+        // Collections, as the library's item pane shows them: the library
+        // icon and each collection's own name, on the same line (a row is
+        // as high as any other; what does not fit ends in "…"; all paths
+        // on hover).
         const paths = this.itemPaths[`${zItem.libraryID}:${zItem.key}`];
         if (paths && paths.length > 0) {
-            const pathsEl = bottomRow.createDiv({ cls: "zotflow-paths" });
-
-            paths.forEach((path) => {
-                const pill = pathsEl.createSpan({ cls: "zotflow-path-pill" });
-
-                const segments = path.split("/");
-                segments.forEach((seg, i) => {
-                    pill.createSpan({ text: seg.trim() });
-                    if (i < segments.length - 2) {
-                        pill.createSpan({ cls: "path-sep", text: "/" });
-                    }
-                });
+            const names = [
+                ...new Set(
+                    paths.map((p) => p.split("/").pop()!.trim()).filter(Boolean),
+                ),
+            ];
+            const collsEl = bottomRow.createDiv({
+                cls: "zotflow-suggest-colls",
+                attr: { title: paths.join("\n") },
+            });
+            setIcon(collsEl.createSpan({ cls: "zotflow-suggest-colls-icon" }), "library");
+            const namesEl = collsEl.createSpan({ cls: "zotflow-suggest-colls-names" });
+            names.forEach((name) => {
+                namesEl.createSpan({ cls: "zotflow-suggest-coll", text: name });
             });
         }
     }

@@ -51,6 +51,7 @@ import {
     definitionsFor,
     editingMarker,
     normalizeFootnotes,
+    pandocCitationChanges,
     parseCluster,
     preparePaste,
     scanFootnotes,
@@ -648,6 +649,9 @@ export function insertFootnote(editor: Editor): void {
 
 /** Put a note's footnotes in order now. */
 export function renumberFootnotes(editor: Editor): void {
+    // Citation footnotes in the old bare form: in Pandoc's (the edit puts
+    // the footnotes in order too, in the same step).
+    applyTextChanges(editor, pandocCitationChanges(editor.getValue()));
     const changes = normalizeFootnotes(editor.getValue(), { level: level() });
     applyTextChanges(editor, changes);
 }

@@ -68,6 +68,23 @@ describe("citation footnotes in Chicago notes and bibliography", () => {
         expect(notes[2]).toBe("Heims, The Cybernetics Group, 45; Hayles, How We Became Posthuman, 7.");
     });
 
+    it("a work cited again right after: short again (the 18th edition prints no \"Ibid.\"); other locators, words after", async () => {
+        const service = new CslRenderService({ fetcher: offline, store: new MemoryKVStore() });
+        await service.seedStyle("chicago-notes-bibliography", BUNDLED_STYLES["chicago-notes-bibliography"]!);
+        const notes = await service.renderNotes(
+            [heims],
+            [
+                { noteIndex: 1, items: [{ id: heims.id, locator: "23", label: "page" }] },
+                { noteIndex: 2, items: [{ id: heims.id, locator: "3", label: "chapter", suffix: ", emphasis added" }] },
+                { noteIndex: 3, items: [{ id: heims.id, locator: "45", label: "page", prefix: "see " }] },
+            ],
+            { styleId: "chicago-notes-bibliography", format: "text" },
+        );
+        expect(notes[1]).toBe("Heims, The Cybernetics Group, chap. 3, emphasis added.");
+        expect(notes[2]).toBe("See Heims, The Cybernetics Group, 45.");
+        expect(notes.join(" ")).not.toMatch(/ibid/i);
+    });
+
     it("a short title when Zotero has none: the main title, before its subtitle", () => {
         expect(mainTitle(hayles.title as string)).toBe("How We Became Posthuman");
         expect(mainTitle("Was ist Aufklärung? Thesen und Definitionen")).toBe("Was ist Aufklärung?");

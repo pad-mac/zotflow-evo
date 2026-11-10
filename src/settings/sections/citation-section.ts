@@ -15,13 +15,14 @@ export class CitationSection {
                 items: [
                     {
                         name: "Default Citation Format",
-                        desc: "Format used when inserting a citation with Enter (no modifier key).",
+                        desc: "What the citation picker inserts: Enter picks the work, then type the page or range and Enter again (Enter alone: without one). Footnote, with numbered footnotes on: [^1] with Pandoc's citation as its text ([^1]: [@key, p. 23]); Pandoc: [@key, p. 23]; Citation key: @key [p. 23]; Wikilink: the link (no page).",
                         control: {
                             type: "dropdown",
                             key: "defaultCitationFormat",
                             options: {
-                                pandoc: "Pandoc",
                                 footnote: "Footnote",
+                                pandoc: "Pandoc",
+                                citekey: "Citation key",
                                 wikilink: "Wikilink",
                             },
                         },

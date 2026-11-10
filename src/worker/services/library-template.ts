@@ -751,7 +751,16 @@ export class LibraryTemplateService {
     async evoRenderNotes(
         notes: {
             noteIndex: number;
-            items: { citekey: string; locator: string; prefix: string }[];
+            items: {
+                citekey: string;
+                locator: string;
+                /** CSL locator label ("page", "chapter", …). */
+                label?: string;
+                prefix: string;
+                /** With its separator (", emphasis added"). */
+                suffix?: string;
+                suppressAuthor?: boolean;
+            }[];
         }[],
         opts: { styleId: string; locale?: string },
     ): Promise<{ notes: (string | null)[]; missing: string[] }> {
@@ -798,8 +807,10 @@ export class LibraryTemplateService {
                     noteIndex: n.noteIndex,
                     items: n.items.map((it) => ({
                         id: ids.get(it.citekey)!,
-                        ...(it.locator ? { locator: it.locator, label: "page" } : {}),
+                        ...(it.locator ? { locator: it.locator, label: it.label || "page" } : {}),
                         ...(it.prefix ? { prefix: `${it.prefix} ` } : {}),
+                        ...(it.suffix ? { suffix: it.suffix } : {}),
+                        ...(it.suppressAuthor ? { suppressAuthor: true } : {}),
                     })),
                 })),
                 { styleId: opts.styleId, locale: opts.locale, format: "html" },
