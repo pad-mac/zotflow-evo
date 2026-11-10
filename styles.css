@@ -5331,24 +5331,11 @@ body.minimal-focus-mode
     transition: color 90ms ease-out;
 }
 
-/* The brackets around the number (the text); a word joiner first, so the
-   marker stays on the line of the word before it. CodeMirror's images
-   beside the hidden "[^" and "]" would let the line break there: not shown
-   (the cursor is never beside them: then the source shows). */
-.zotflow-fn-ref {
-    white-space: nowrap;
-}
-
-.zotflow-fn-ref > img.cm-widgetBuffer {
+/* CodeMirror's image before a widget lets the line break there (the [n]
+   alone at the start of the next line); a reference is never beside the
+   cursor (then its source shows), which is what the image is for. */
+.markdown-source-view.mod-cm6 .cm-line img.cm-widgetBuffer:has(+ .zotflow-fn-ref) {
     display: none;
-}
-
-.zotflow-fn-ref::before {
-    content: "\2060[";
-}
-
-.zotflow-fn-ref::after {
-    content: "]";
 }
 
 .zotflow-fn-ref:hover {
@@ -5360,12 +5347,14 @@ body.minimal-focus-mode
 }
 
 /* A part's notes: smaller, subdued, a short rule above the first, the
-   number hanging before the text. */
+   number hanging before the text. The indent wins over a theme's or
+   Obsidian's own for footnote lines: without the padding the number went
+   out of view. */
 .markdown-source-view.mod-cm6 .cm-line.zotflow-fn-def {
-    padding-inline-start: 1.8em;
+    padding-inline-start: 1.8em !important;
     color: var(--text-muted);
     font-size: 0.875em;
-    text-indent: -1.8em;
+    text-indent: -1.8em !important;
 }
 
 .markdown-source-view.mod-cm6 .cm-line.zotflow-fn-def.is-first {

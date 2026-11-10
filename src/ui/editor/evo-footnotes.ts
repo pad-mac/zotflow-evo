@@ -20,6 +20,7 @@
 import {
     Annotation,
     EditorState,
+    Prec,
     StateEffect,
     StateField,
     type Extension,
@@ -38,6 +39,7 @@ import {
     TFile,
     editorLivePreviewField,
     sanitizeHTMLToDom,
+    setTooltip,
     type Editor,
     type MarkdownFileInfo,
     type MarkdownView,
@@ -333,6 +335,44 @@ function jump(view: EditorView, pos: number | null) {
     view.focus();
 }
 
+/**
+ * A reference: one element of its own, so Obsidian's styling of the pieces
+ * of `[^1]` (`[^`, `1`, `]`) does not reach it. A word joiner first, and
+ * CodeMirror's image before it hidden (styles.css): the marker stays on the
+ * line of the word before it.
+ */
+class RefWidget extends WidgetType {
+    constructor(
+        readonly label: string,
+        readonly tip: string,
+        readonly missing: boolean,
+    ) {
+        super();
+    }
+    eq(other: RefWidget) {
+        return other.label === this.label && other.tip === this.tip && other.missing === this.missing;
+    }
+    toDOM(view: EditorView) {
+        const sup = activeWindow.createEl("sup", {
+            cls: this.missing ? "zotflow-fn-ref is-missing" : "zotflow-fn-ref",
+            // A word joiner first: no line break before the marker.
+            text: `\u2060[${this.label}]`,
+        });
+        if (this.tip) setTooltip(sup, this.tip, { placement: "top" });
+        sup.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            // To the note (its text, to read or write).
+            jump(view, find(view, this.label, "def"));
+        });
+        return sup;
+    }
+    ignoreEvent() {
+        return true;
+    }
+}
+
 class NumberWidget extends WidgetType {
     constructor(readonly label: string) {
         super();
@@ -373,7 +413,6 @@ class NoteWidget extends WidgetType {
     }
 }
 
-const hidden = Decoration.replace({});
 const defLine = Decoration.line({ class: "zotflow-fn-def" });
 const defLineFirst = Decoration.line({ class: "zotflow-fn-def is-first" });
 const missingMark = Decoration.mark({ class: "zotflow-fn-unknown" });
@@ -438,25 +477,14 @@ class FootnoteView {
         const inView = (from: number, to: number) =>
             visible.some((v) => to >= v.from && from <= v.to);
 
-        // A reference: its number, as [n] raised (the CSS); "[^" and "]"
-        // hidden. Text, not a widget: CodeMirror sets an image beside each
-        // widget, where a line may break (the [n] alone on the next line).
         for (const r of scan.refs) {
             if (!inView(r.from, r.to) || touches(state, r.from, r.to)) continue;
             const { tip, missing } = tipOf(r.label);
-            const attributes: Record<string, string> = { "data-zotflow-fn": r.label };
-            if (tip) {
-                attributes["aria-label"] = tip;
-                attributes["data-tooltip-position"] = "top";
-            }
             ranges.push(
-                Decoration.mark({
-                    class: missing ? "zotflow-fn-ref is-missing" : "zotflow-fn-ref",
-                    attributes,
-                    inclusive: true,
-                }).range(r.from, r.to),
-                hidden.range(r.from, r.from + 2),
-                hidden.range(r.to - 1, r.to),
+                Decoration.replace({ widget: new RefWidget(r.label, tip, missing) }).range(
+                    r.from,
+                    r.to,
+                ),
             );
         }
         const doc = state.doc;
@@ -532,14 +560,6 @@ function rememberCopy(view: EditorView) {
 }
 
 const clipboard = EditorView.domEventHandlers({
-    mousedown: (e, view) => {
-        // A reference: to its note (its text, to read or write).
-        const ref = (e.target as HTMLElement | null)?.closest?.("[data-zotflow-fn]");
-        if (!ref || e.button !== 0 || e.shiftKey || e.altKey) return false;
-        e.preventDefault();
-        jump(view, find(view, ref.getAttribute("data-zotflow-fn") ?? "", "def"));
-        return true;
-    },
     copy: (_e, view) => {
         rememberCopy(view);
         return false;
@@ -657,7 +677,9 @@ export function applyTextChanges(editor: Editor, changes: TextChange[]): void {
 /* ------------------------------- registration ---------------------------- */
 
 export function evoFootnotesExtension(): Extension {
-    return [pendingField, editedField, orderFilter, displayPlugin, clipboard];
+    // The display before Obsidian's own: its hiding and styling of footnote
+    // syntax does not take the numbers' place.
+    return [pendingField, editedField, orderFilter, Prec.highest(displayPlugin), clipboard];
 }
 
 /**
