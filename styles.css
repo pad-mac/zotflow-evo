@@ -5346,6 +5346,30 @@ body.minimal-focus-mode
     color: var(--text-error);
 }
 
+/* A reference's hover: its note, in Obsidian's popover, as small as the
+   note (Obsidian's sizes are for a page preview). */
+.popover.hover-popover.zotflow-fn-popover {
+    width: auto;
+    max-width: min(34em, 90vw);
+    min-height: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.zotflow-fn-popover-body {
+    padding: var(--size-4-2) var(--size-4-3);
+    font-size: var(--font-text-size);
+    line-height: var(--line-height-normal);
+}
+
+.zotflow-fn-popover-body > p:first-child {
+    margin-top: 0;
+}
+
+.zotflow-fn-popover-body > p:last-child {
+    margin-bottom: 0;
+}
+
 /* A part's notes: smaller, subdued, a short rule above the first, the
    number hanging before the text. The indent wins over a theme's or
    Obsidian's own for footnote lines: without the padding the number went

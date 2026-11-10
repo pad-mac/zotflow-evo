@@ -36,11 +36,14 @@ import {
     type ViewUpdate,
 } from "@codemirror/view";
 import {
+    HoverPopover,
+    MarkdownRenderer,
     TFile,
+    editorInfoField,
     editorLivePreviewField,
     sanitizeHTMLToDom,
-    setTooltip,
     type Editor,
+    type HoverParent,
     type MarkdownFileInfo,
     type MarkdownView,
     type Plugin,
@@ -308,11 +311,6 @@ function scheduleRender(view: EditorView, scan: FootnoteScan) {
     }, 300);
 }
 
-/** Plain text of a note's HTML (for a tooltip). */
-function textOf(html: string): string {
-    return sanitizeHTMLToDom(html).textContent ?? "";
-}
-
 /* -------------------------------- display -------------------------------- */
 
 /** Where a footnote's definition or (first) reference is, now. */
@@ -335,6 +333,46 @@ function jump(view: EditorView, pos: number | null) {
     view.focus();
 }
 
+/** What a reference's hover shows: the rendered note, or the note's text. */
+interface RefNote {
+    html: string | null;
+    markdown: string;
+}
+
+/** Popovers without a note view to belong to (a file in no view). */
+const looseHoverParent: HoverParent = { hoverPopover: null };
+let hovering: { target: HTMLElement; popover: HoverPopover } | null = null;
+
+/**
+ * The note in a popover above its reference, as Obsidian's own footnote
+ * preview (which hovers Obsidian's text of the marker, not shown here): a
+ * citation as its rendered note, a note of one's own as Markdown.
+ */
+function showNote(view: EditorView, target: HTMLElement, note: RefNote) {
+    // Shown for this marker already (the pointer back on it): it stays.
+    if (hovering?.target === target && hovering.popover.hoverEl.isConnected) return;
+    const info = view.state.field(editorInfoField, false);
+    const popover = new HoverPopover(info ?? looseHoverParent, target, 250);
+    const current = { target, popover };
+    hovering = current;
+    popover.register(() => {
+        if (hovering === current) hovering = null;
+    });
+    popover.hoverEl.addClass("zotflow-fn-popover");
+    const body = popover.hoverEl.createDiv({ cls: "markdown-rendered zotflow-fn-popover-body" });
+    if (note.html !== null) {
+        body.appendChild(sanitizeHTMLToDom(note.html));
+    } else {
+        void MarkdownRenderer.render(
+            services.app,
+            note.markdown,
+            body,
+            info?.file?.path ?? "",
+            popover,
+        );
+    }
+}
+
 /**
  * A reference: one element of its own, so Obsidian's styling of the pieces
  * of `[^1]` (`[^`, `1`, `]`) does not reach it. A word joiner first, and
@@ -344,21 +382,27 @@ function jump(view: EditorView, pos: number | null) {
 class RefWidget extends WidgetType {
     constructor(
         readonly label: string,
-        readonly tip: string,
-        readonly missing: boolean,
+        readonly note: RefNote | null,
     ) {
         super();
     }
     eq(other: RefWidget) {
-        return other.label === this.label && other.tip === this.tip && other.missing === this.missing;
+        return (
+            other.label === this.label &&
+            other.note?.html === this.note?.html &&
+            other.note?.markdown === this.note?.markdown
+        );
     }
     toDOM(view: EditorView) {
         const sup = activeWindow.createEl("sup", {
-            cls: this.missing ? "zotflow-fn-ref is-missing" : "zotflow-fn-ref",
+            cls: this.note ? "zotflow-fn-ref" : "zotflow-fn-ref is-missing",
             // A word joiner first: no line break before the marker.
             text: `\u2060[${this.label}]`,
         });
-        if (this.tip) setTooltip(sup, this.tip, { placement: "top" });
+        const note = this.note;
+        if (note && (note.html || note.markdown.trim())) {
+            sup.addEventListener("mouseenter", () => showNote(view, sup, note));
+        }
         sup.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
             e.preventDefault();
@@ -465,11 +509,10 @@ class FootnoteView {
             const key = this.keys.get(d.label);
             return firstDef.get(d.label) === d && key !== undefined ? rendered.get(key) : undefined;
         };
-        const tipOf = (label: string): { tip: string; missing: boolean } => {
+        const noteFor = (label: string): RefNote | null => {
             const d = firstDef.get(label);
-            if (!d) return { tip: "", missing: true };
-            const html = noteOf(d);
-            return { tip: html ? textOf(html) : d.body.trim(), missing: false };
+            if (!d) return null;
+            return { html: noteOf(d) ?? null, markdown: d.body.trim() };
         };
 
         const ranges: Range<Decoration>[] = [];
@@ -479,9 +522,8 @@ class FootnoteView {
 
         for (const r of scan.refs) {
             if (!inView(r.from, r.to) || touches(state, r.from, r.to)) continue;
-            const { tip, missing } = tipOf(r.label);
             ranges.push(
-                Decoration.replace({ widget: new RefWidget(r.label, tip, missing) }).range(
+                Decoration.replace({ widget: new RefWidget(r.label, noteFor(r.label)) }).range(
                     r.from,
                     r.to,
                 ),
