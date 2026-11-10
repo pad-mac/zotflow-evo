@@ -619,7 +619,7 @@ export class LibraryTemplateService {
      * the citekey it was asked for. Items synced before csljson was pulled are
      * backfilled once (network); a failure there lists the key as missing.
      *
-     * Public through `plugin.api.getCslItems` (see `api.ts`).
+     * Public through `plugin.api.getCslItems` (see `services/evo-api.ts`).
      */
     async getCslItemsByCitekey(
         citekeys: string[],

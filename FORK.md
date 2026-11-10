@@ -343,6 +343,22 @@ a board reads the collection when it opens. ZotFlow's database is the
 IndexedDB database `zotflow-dev` (tables `items`, `collections`; see
 AGENTS.md, "Database").
 
+For Typeset Vitro (beta.21), the same `api` also hands out citation data, so
+Typeset Vitro needs no Better BibTeX export:
+
+```ts
+const api = app.plugins.plugins["zotflow-evo"]?.api;
+const { items, missing } = await api.getCslItems(["latour1996", "ABCD1234"]);
+api.cslStylesFolder();             // vault folder with custom .csl styles, "" if none
+const off = api.onSyncFinished(() => …);
+```
+
+`getCslItems` takes Pandoc citekeys as ZotFlow's citation templates write
+them (an item's `citationKey`, else its Zotero item key) and returns the
+stored CSL-JSON of each item with `id` set to that citekey; items synced
+before CSL-JSON was pulled are fetched once (as the `citation` filter
+does). Only regular, non-trashed items of the active libraries count.
+
 ### Annotation strip tab
 
 A tab with the note strip alone ("Open annotation strip"), beside the note

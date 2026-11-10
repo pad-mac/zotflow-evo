@@ -12,8 +12,16 @@
  *
  * A change is a hint to read again, not a log: changes made while a
  * listener was not there are not repeated.
+ *
+ * For Typeset Vitro (citations without a Better BibTeX export):
+ *
+ * - `api.getCslItems(citekeys)` → CSL-JSON for Pandoc citekeys
+ *   (`citationKey`, else the Zotero item key), each `id` set to the citekey
+ * - `api.cslStylesFolder()` → vault folder ZotFlow scans for .csl styles
+ * - `api.onSyncFinished(cb)` → after every sync; returns the function that stops it
  */
 import { services } from "services/services";
+import { workerBridge } from "bridge";
 
 import type { Plugin } from "obsidian";
 import type { CollectionChange } from "services/event-hub";
@@ -26,6 +34,11 @@ export interface ZotFlowEvoApi {
     onCollectionsChanged(
         callback: (changes: CollectionChange[]) => void,
     ): () => void;
+    getCslItems(
+        citekeys: string[],
+    ): Promise<{ items: Record<string, unknown>[]; missing: string[] }>;
+    cslStylesFolder(): string;
+    onSyncFinished(callback: () => void): () => void;
 }
 
 export function registerEvoApi(plugin: Plugin) {
@@ -38,6 +51,29 @@ export function registerEvoApi(plugin: Plugin) {
                 } catch (e) {
                     services.logService.warn(
                         "A listener for collection changes failed",
+                        "EvoApi",
+                        e,
+                    );
+                }
+            }),
+        getCslItems: async (citekeys) => {
+            const result =
+                await workerBridge.libraryTemplate.getCslItemsByCitekey(
+                    citekeys,
+                );
+            return {
+                items: result.items as unknown as Record<string, unknown>[],
+                missing: result.missing,
+            };
+        },
+        cslStylesFolder: () => services.settings.cslStylesFolder ?? "",
+        onSyncFinished: (callback) =>
+            services.eventHub.syncFinished.subscribe(() => {
+                try {
+                    callback();
+                } catch (e) {
+                    services.logService.warn(
+                        "A listener for finished syncs failed",
                         "EvoApi",
                         e,
                     );

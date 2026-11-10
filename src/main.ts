@@ -70,7 +70,6 @@ import { CitationSuggest } from "ui/editor/citation-suggest";
 import { registerEvoFootnotes } from "ui/editor/evo-footnotes";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import { focusReaderLeaf } from "utils/reader-leaf-navigation";
-import { createPublicApi, type ZotFlowPublicApi } from "api";
 
 const SUPPORTED_EXTENSIONS = ["pdf", "epub", "html"];
 
@@ -79,8 +78,6 @@ const ff = fireAndForgetIn("ZotFlow");
 
 export default class ZotFlow extends Plugin {
     settings: ZotFlowSettings;
-    /** Public API for other plugins — see `api.ts`. */
-    readonly api: ZotFlowPublicApi = createPublicApi(this.app, () => this.settings);
     viewStates: Record<string, ViewStateEntry>;
     customThemes: CustomReaderTheme[] = [];
     cslFolder: CslFolderService;
