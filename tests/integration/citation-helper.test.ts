@@ -28,6 +28,7 @@ import {
     ZOTFLOW_CITATION_MIME,
 } from "ui/editor/citation-helper";
 import { clusterItem, formatCluster } from "utils/evo-footnotes";
+import { takeDropPosition } from "ui/editor/drop-position";
 
 import type { AnnotationJSON } from "types/zotero-reader";
 
@@ -152,6 +153,9 @@ function createDropEvent(
         ctrlKey: boolean;
         metaKey: boolean;
         altKey: boolean;
+        /** Where the pointer is (the fake view below maps x to an offset). */
+        clientX: number;
+        clientY: number;
     }> = {},
     defaultPrevented = false,
 ) {
@@ -737,5 +741,62 @@ describe("ZotFlow Evo: numbered citation footnotes", () => {
         insertCitationResult(same, { line: 0, ch: 8 }, cite("zfc4", "smith2024", "3"));
         expect(same.doc).toContain("Text[^1][^zfc4] here.");
         expect(same.doc).toContain("[^1]: [@smith2024, p. 2]\n");
+    });
+});
+
+/* ================================================================ */
+/*  ZotFlow Evo: where a drop lands                                  */
+/* ================================================================ */
+
+describe("ZotFlow Evo: a drop goes where the pointer is, not where the cursor was", () => {
+    const info = {} as never;
+    /** The editor with a CodeMirror view whose posAtCoords reads x as an offset. */
+    const withView = (text: string) => {
+        const editor = createEditor(text);
+        return Object.assign(editor, {
+            cm: { posAtCoords: (c: { x: number; y: number }) => (c.x >= 0 ? c.x : null) },
+        });
+    };
+
+    it("a citation: at the drop; the cursor moved there first (as Obsidian would)", async () => {
+        state.citation = { citation: "[@smith]", citekey: "smith" };
+        const editor = withView("Before. After.");
+        editor.placeCursor({ line: 0, ch: 0 });
+        const evt = createDropEvent(
+            JSON.stringify({ type: "zotflow-citation", libraryID: 1, key: "K" }),
+            { clientX: 7, clientY: 1 },
+        );
+        handleEditorDrop(evt as never, editor, info);
+        expect(editor.cursor).toEqual({ line: 0, ch: 7 });
+        await vi.waitFor(() => expect(editor.doc).toBe("Before.[@smith] After."));
+    });
+
+    it("a footnote with Shift: its reference at the drop", async () => {
+        const item = clusterItem("smith", { label: "page", locator: "4" });
+        state.citation = {
+            citation: "[^zfc1]",
+            citekey: "smith",
+            footnoteDef: `[^zfc1]: ${formatCluster([item])}`,
+            evoCite: item,
+        };
+        const editor = withView("One. Two.");
+        editor.placeCursor({ line: 0, ch: 9 });
+        const evt = createDropEvent(
+            JSON.stringify({ type: "zotflow-citation", libraryID: 1, key: "K" }),
+            { shiftKey: true, clientX: 4, clientY: 1 },
+        );
+        handleEditorDrop(evt as never, editor, info);
+        await vi.waitFor(() =>
+            expect(editor.doc).toBe("One.[^zfc1] Two.\n\n[^zfc1]: [@smith, p. 4]\n"),
+        );
+    });
+
+    it("no view, or no place under the pointer: the cursor, as before", () => {
+        const plain = createEditor("abc");
+        plain.placeCursor({ line: 0, ch: 2 });
+        expect(takeDropPosition({ clientX: 1, clientY: 1 } as DragEvent, plain as never)).toEqual({ line: 0, ch: 2 });
+        const outside = withView("abc");
+        outside.placeCursor({ line: 0, ch: 1 });
+        expect(takeDropPosition({ clientX: -1, clientY: 1 } as DragEvent, outside as never)).toEqual({ line: 0, ch: 1 });
     });
 });

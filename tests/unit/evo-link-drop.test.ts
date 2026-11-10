@@ -143,7 +143,7 @@ function fakeEditor(text: string, cursor: { line: number; ch: number }) {
     };
 }
 
-const dropOf = (items: unknown, mods: Record<string, boolean> = {}, citation = "") => {
+const dropOf = (items: unknown, mods: Record<string, boolean | number> = {}, citation = "") => {
     let prevented = false;
     return {
         shiftKey: false,
@@ -259,6 +259,20 @@ describe("handleSourceLinkDrop", () => {
         const e = fakeEditor("x", { line: 0, ch: 1 });
         const evt = dropOf([item("AAAA")], { shiftKey: true }, '{"type":"zotflow-citation","libraryID":1,"key":"AAAA"}');
         expect(handleSourceLinkDrop(evt, e.editor, info)).toBe(false);
+    });
+
+    it("ZotFlow Evo: links and the Shift footnote go where the pointer is, not where the cursor was", async () => {
+        const at = (e: ReturnType<typeof fakeEditor>) =>
+            Object.assign(e.editor, { cm: { posAtCoords: (c: { x: number }) => c.x } });
+        const e = fakeEditor("see  here", { line: 0, ch: 9 });
+        at(e);
+        handleSourceLinkDrop(dropOf([item("AAAA")], { clientX: 4, clientY: 1 }), e.editor, info);
+        await vi.waitFor(() => expect(e.doc).toBe("see [[Source/@doe2024|from Notes/Reading.md]] here"));
+        state.evoFootnotes = true;
+        const f = fakeEditor("One. Two.", { line: 0, ch: 0 });
+        at(f);
+        handleSourceLinkDrop(dropOf([item("AAAA")], { shiftKey: true, clientX: 4, clientY: 1 }), f.editor, info);
+        await vi.waitFor(() => expect(f.doc).toBe("One.[^zfcAAAA] Two.\n\n[^zfcAAAA]: [@aaaa]\n"));
     });
 
     it("leaves other drops, and drops with a modifier key, alone", () => {

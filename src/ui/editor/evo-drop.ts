@@ -17,6 +17,7 @@
  * `citation-helper.ts`. See FORK.md.
  */
 import { services } from "services/services";
+import { takeDropPosition } from "ui/editor/drop-position";
 
 import type { Editor } from "obsidian";
 import type { EvoDropAffixes } from "settings/types";
@@ -215,7 +216,7 @@ export function handleReaderDrop(
     if (!payload.evoSource || !payload.annotations?.length) return false;
     if (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey) return false;
 
-    const pos = editor.getCursor();
+    const pos = takeDropPosition(evt, editor);
     const baselineDoc = editor.getValue();
     resolveReaderDrop(payload)
         .then((text) => {

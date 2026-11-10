@@ -11,12 +11,13 @@
 import { TFile } from "obsidian";
 
 import { services } from "services/services";
+import { takeDropPosition } from "ui/editor/drop-position";
 import { ZOTFLOW_CITATION_MIME, insertCitationResult } from "ui/editor/citation-helper";
 import { formatCluster, type ClusterItem } from "utils/evo-footnotes";
 
 import type { CitationResult } from "services/citation-service";
 
-import type { Editor, MarkdownFileInfo, MarkdownView } from "obsidian";
+import type { Editor, EditorPosition, MarkdownFileInfo, MarkdownView } from "obsidian";
 
 /** MIME type of the drag payload the library browser sets. */
 export const ZOTFLOW_SOURCE_LINKS_MIME = "application/zotflow-source-links";
@@ -123,12 +124,12 @@ export function handleSourceLinkDrop(
         if (evt.dataTransfer?.getData(ZOTFLOW_CITATION_MIME)) return false;
         if (!services.settings.evoFootnotes) return false;
         evt.preventDefault();
-        dropAsFootnote(editor, payload.items);
+        dropAsFootnote(editor, takeDropPosition(evt, editor), payload.items);
         return true;
     }
 
     evt.preventDefault();
-    const pos = editor.getCursor();
+    const pos = takeDropPosition(evt, editor);
     const baselineDoc = editor.getValue();
     const sourcePath = info.file?.path ?? "";
 
@@ -187,8 +188,11 @@ export function handleSourceLinkDrop(
  * citing them all (`[^1]: [@a; @b]`), numbered and placed as any other
  * (right after a citation footnote: the works join it).
  */
-function dropAsFootnote(editor: Editor, items: SourceLinksPayload["items"]): void {
-    const pos = editor.getCursor();
+function dropAsFootnote(
+    editor: Editor,
+    pos: EditorPosition,
+    items: SourceLinksPayload["items"],
+): void {
     const baselineDoc = editor.getValue();
     (async () => {
         const results: CitationResult[] = [];

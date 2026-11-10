@@ -1,4 +1,5 @@
 import { services } from "services/services";
+import { takeDropPosition } from "ui/editor/drop-position";
 import { formatCluster, parseCluster, scanFootnotes } from "utils/evo-footnotes";
 import { handleReaderDrop } from "ui/editor/evo-drop";
 import { handleSourceLinkDrop } from "ui/editor/evo-link-drop";
@@ -244,7 +245,7 @@ export function handleEditorDrop(
     // their own drop templates (settings); a modifier key keeps the formats below.
     if (handleReaderDrop(evt, editor, payload)) return;
 
-    const pos = editor.getCursor();
+    const pos = takeDropPosition(evt, editor);
     const baselineDoc = editor.getValue();
     const format = resolveFormatFromModifiers(evt);
 
