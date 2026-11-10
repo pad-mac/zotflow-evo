@@ -5319,55 +5319,33 @@ body.minimal-focus-mode
 
 /* ----- Numbered footnotes (beta.17) ----- */
 
-/* A reference: a small raised [n], like Obsidian's own footnotes. */
-.zotflow-fn-ref {
-    padding-inline: 0.05em;
+/* A reference: Obsidian's own text of [^1] (its pieces small and raised by
+   Obsidian, hovered for its footnote popover), the "^" hidden, in the
+   accent colour; kept on the line of the word before it. */
+.zotflow-fn-caret {
+    display: none;
+}
+
+.zotflow-fn-glue {
+    white-space: nowrap;
+}
+
+.markdown-source-view.mod-cm6 .zotflow-fn-ref,
+.markdown-source-view.mod-cm6 .zotflow-fn-ref span.cm-footref {
     color: var(--text-accent);
-    font-size: 0.75em;
     font-variant-numeric: tabular-nums;
-    line-height: 0;
-    vertical-align: super;
     cursor: pointer;
     transition: color 90ms ease-out;
 }
 
-/* CodeMirror's image before a widget lets the line break there (the [n]
-   alone at the start of the next line); a reference is never beside the
-   cursor (then its source shows), which is what the image is for. */
-.markdown-source-view.mod-cm6 .cm-line img.cm-widgetBuffer:has(+ .zotflow-fn-ref) {
-    display: none;
-}
-
-.zotflow-fn-ref:hover {
+.markdown-source-view.mod-cm6 .zotflow-fn-ref:hover,
+.markdown-source-view.mod-cm6 .zotflow-fn-ref:hover span.cm-footref {
     color: var(--text-accent-hover);
 }
 
-.zotflow-fn-ref.is-missing {
+.markdown-source-view.mod-cm6 .zotflow-fn-ref.is-missing,
+.markdown-source-view.mod-cm6 .zotflow-fn-ref.is-missing span.cm-footref {
     color: var(--text-error);
-}
-
-/* A reference's hover: its note, in Obsidian's popover, as small as the
-   note (Obsidian's sizes are for a page preview). */
-.popover.hover-popover.zotflow-fn-popover {
-    width: auto;
-    max-width: min(34em, 90vw);
-    min-height: 0;
-    max-height: 40vh;
-    overflow-y: auto;
-}
-
-.zotflow-fn-popover-body {
-    padding: var(--size-4-2) var(--size-4-3);
-    font-size: var(--font-text-size);
-    line-height: var(--line-height-normal);
-}
-
-.zotflow-fn-popover-body > p:first-child {
-    margin-top: 0;
-}
-
-.zotflow-fn-popover-body > p:last-child {
-    margin-bottom: 0;
 }
 
 /* A part's notes: smaller, subdued, a short rule above the first, the

@@ -36,14 +36,10 @@ import {
     type ViewUpdate,
 } from "@codemirror/view";
 import {
-    HoverPopover,
-    MarkdownRenderer,
     TFile,
-    editorInfoField,
     editorLivePreviewField,
     sanitizeHTMLToDom,
     type Editor,
-    type HoverParent,
     type MarkdownFileInfo,
     type MarkdownView,
     type Plugin,
@@ -333,90 +329,6 @@ function jump(view: EditorView, pos: number | null) {
     view.focus();
 }
 
-/** What a reference's hover shows: the rendered note, or the note's text. */
-interface RefNote {
-    html: string | null;
-    markdown: string;
-}
-
-/** Popovers without a note view to belong to (a file in no view). */
-const looseHoverParent: HoverParent = { hoverPopover: null };
-let hovering: { target: HTMLElement; popover: HoverPopover } | null = null;
-
-/**
- * The note in a popover above its reference, as Obsidian's own footnote
- * preview (which hovers Obsidian's text of the marker, not shown here): a
- * citation as its rendered note, a note of one's own as Markdown.
- */
-function showNote(view: EditorView, target: HTMLElement, note: RefNote) {
-    // Shown for this marker already (the pointer back on it): it stays.
-    if (hovering?.target === target && hovering.popover.hoverEl.isConnected) return;
-    const info = view.state.field(editorInfoField, false);
-    const popover = new HoverPopover(info ?? looseHoverParent, target, 250);
-    const current = { target, popover };
-    hovering = current;
-    popover.register(() => {
-        if (hovering === current) hovering = null;
-    });
-    popover.hoverEl.addClass("zotflow-fn-popover");
-    const body = popover.hoverEl.createDiv({ cls: "markdown-rendered zotflow-fn-popover-body" });
-    if (note.html !== null) {
-        body.appendChild(sanitizeHTMLToDom(note.html));
-    } else {
-        void MarkdownRenderer.render(
-            services.app,
-            note.markdown,
-            body,
-            info?.file?.path ?? "",
-            popover,
-        );
-    }
-}
-
-/**
- * A reference: one element of its own, so Obsidian's styling of the pieces
- * of `[^1]` (`[^`, `1`, `]`) does not reach it. A word joiner first, and
- * CodeMirror's image before it hidden (styles.css): the marker stays on the
- * line of the word before it.
- */
-class RefWidget extends WidgetType {
-    constructor(
-        readonly label: string,
-        readonly note: RefNote | null,
-    ) {
-        super();
-    }
-    eq(other: RefWidget) {
-        return (
-            other.label === this.label &&
-            other.note?.html === this.note?.html &&
-            other.note?.markdown === this.note?.markdown
-        );
-    }
-    toDOM(view: EditorView) {
-        const sup = activeWindow.createEl("sup", {
-            cls: this.note ? "zotflow-fn-ref" : "zotflow-fn-ref is-missing",
-            // A word joiner first: no line break before the marker.
-            text: `\u2060[${this.label}]`,
-        });
-        const note = this.note;
-        if (note && (note.html || note.markdown.trim())) {
-            sup.addEventListener("mouseenter", () => showNote(view, sup, note));
-        }
-        sup.addEventListener("mousedown", (e) => {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            // To the note (its text, to read or write).
-            jump(view, find(view, this.label, "def"));
-        });
-        return sup;
-    }
-    ignoreEvent() {
-        return true;
-    }
-}
-
 class NumberWidget extends WidgetType {
     constructor(readonly label: string) {
         super();
@@ -457,6 +369,28 @@ class NoteWidget extends WidgetType {
     }
 }
 
+/*
+ * A reference stays Obsidian's text of `[^1]`, in the pieces Obsidian styles
+ * (small, raised) and hovers (its footnote popover, to read and write the
+ * note): only the "^" hidden, and around it, from outside all of Obsidian's
+ * styling (outerDecorations), the marker's colour and a wrapper that keeps
+ * it on the line of the word before it.
+ */
+const caretMark = Decoration.mark({ class: "zotflow-fn-caret" });
+const glueMark = Decoration.mark({ class: "zotflow-fn-glue" });
+const refMarks = new Map<string, Decoration>();
+function refMark(label: string, missing: boolean): Decoration {
+    const key = `${missing ? "!" : ""}${label}`;
+    let deco = refMarks.get(key);
+    if (!deco) {
+        deco = Decoration.mark({
+            class: missing ? "zotflow-fn-ref is-missing" : "zotflow-fn-ref",
+            attributes: { "data-zotflow-fn": label },
+        });
+        refMarks.set(key, deco);
+    }
+    return deco;
+}
 const defLine = Decoration.line({ class: "zotflow-fn-def" });
 const defLineFirst = Decoration.line({ class: "zotflow-fn-def is-first" });
 const missingMark = Decoration.mark({ class: "zotflow-fn-unknown" });
@@ -467,6 +401,8 @@ function touches(state: EditorState, from: number, to: number): boolean {
 
 class FootnoteView {
     decorations: DecorationSet = Decoration.none;
+    /** Around Obsidian's own decorations: the references' marks. */
+    outer: DecorationSet = Decoration.none;
     private scan: FootnoteScan | null = null;
     private scannedDoc: unknown = null;
     /** Each citation note's key in `rendered`, by number. */
@@ -489,6 +425,7 @@ class FootnoteView {
         const state = this.view.state;
         if (!enabled() || !state.field(editorLivePreviewField, false)) {
             this.decorations = Decoration.none;
+            this.outer = Decoration.none;
             return;
         }
         if (this.scannedDoc !== state.doc) {
@@ -501,6 +438,7 @@ class FootnoteView {
         const scan = this.scan;
         if (!scan) {
             this.decorations = Decoration.none;
+            this.outer = Decoration.none;
             return;
         }
         const firstDef = new Map<string, (typeof scan.defs)[number]>();
@@ -509,26 +447,23 @@ class FootnoteView {
             const key = this.keys.get(d.label);
             return firstDef.get(d.label) === d && key !== undefined ? rendered.get(key) : undefined;
         };
-        const noteFor = (label: string): RefNote | null => {
-            const d = firstDef.get(label);
-            if (!d) return null;
-            return { html: noteOf(d) ?? null, markdown: d.body.trim() };
-        };
 
         const ranges: Range<Decoration>[] = [];
         const visible = this.view.visibleRanges;
         const inView = (from: number, to: number) =>
             visible.some((v) => to >= v.from && from <= v.to);
 
+        const outer: Range<Decoration>[] = [];
         for (const r of scan.refs) {
             if (!inView(r.from, r.to) || touches(state, r.from, r.to)) continue;
-            ranges.push(
-                Decoration.replace({ widget: new RefWidget(r.label, noteFor(r.label)) }).range(
-                    r.from,
-                    r.to,
-                ),
-            );
+            ranges.push(caretMark.range(r.from + 1, r.from + 2));
+            outer.push(refMark(r.label, !firstDef.has(r.label)).range(r.from, r.to));
+            // The character before (not a space): on the same line as it.
+            const line = state.doc.lineAt(r.from);
+            if (r.from > line.from && !/\s/.test(state.doc.sliceString(r.from - 1, r.from)))
+                outer.push(glueMark.range(r.from - 1, r.to));
         }
+        this.outer = Decoration.set(outer, true);
         const doc = state.doc;
         for (const d of scan.defs) {
             if (!inView(d.from, d.to)) continue;
@@ -568,6 +503,8 @@ class FootnoteView {
 
 const displayPlugin = ViewPlugin.fromClass(FootnoteView, {
     decorations: (v) => v.decorations,
+    provide: (plugin) =>
+        EditorView.outerDecorations.of((view) => view.plugin(plugin)?.outer ?? Decoration.none),
 });
 
 /* ------------------------------- copy, paste ----------------------------- */
@@ -602,6 +539,16 @@ function rememberCopy(view: EditorView) {
 }
 
 const clipboard = EditorView.domEventHandlers({
+    mousedown: (e, view) => {
+        // A reference: to its note (hovering it shows Obsidian's popover).
+        const ref = (e.target as HTMLElement | null)?.closest?.("[data-zotflow-fn]");
+        if (!ref || e.button !== 0 || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;
+        const at = find(view, ref.getAttribute("data-zotflow-fn") ?? "", "def");
+        if (at === null) return false;
+        e.preventDefault();
+        jump(view, at);
+        return true;
+    },
     copy: (_e, view) => {
         rememberCopy(view);
         return false;
@@ -719,8 +666,8 @@ export function applyTextChanges(editor: Editor, changes: TextChange[]): void {
 /* ------------------------------- registration ---------------------------- */
 
 export function evoFootnotesExtension(): Extension {
-    // The display before Obsidian's own: its hiding and styling of footnote
-    // syntax does not take the numbers' place.
+    // Highest: the notes' numbers (widgets) win over Obsidian's own
+    // decorations of footnote lines, the hidden "^" sits inside its pieces.
     return [pendingField, editedField, orderFilter, Prec.highest(displayPlugin), clipboard];
 }
 
