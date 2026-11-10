@@ -14,6 +14,7 @@ import { LocaleStore, normalizeLocale } from "./locales";
 import type { KVStore, ResourceFetcher } from "./ports";
 import { StyleResolver } from "./resolve";
 import { bustCache, StyleRepository } from "./styles";
+import type { CitationItem } from "citeproc";
 import type {
 	Availability,
 	CiteProps,
@@ -156,6 +157,54 @@ export class CslRenderService {
 		} finally {
 			this.pool.release(host);
 		}
+	}
+
+	/**
+	 * ZotFlow Evo: a document's notes, in order — each cluster rendered as
+	 * the note numbered `noteIndex`, so a note style gives a work in full the
+	 * first time and short after (and "ibid." where the style has it).
+	 */
+	async renderNotes(
+		items: CSLItem[],
+		clusters: { noteIndex: number; items: (CiteProps & { id: string })[] }[],
+		opts: RenderOptions
+	): Promise<string[]> {
+		const { host } = await this.acquireHost(opts);
+		try {
+			host.setItems(items);
+			const format = opts.format ?? this.defaultFormat;
+			host.setFormat(format);
+			const citations = clusters.map((c, i) => ({
+				citationID: `zf-note-${i}`,
+				citationItems: c.items.map((p) => {
+					const ci: CitationItem = { id: p.id };
+					if (p.locator !== undefined) ci.locator = p.locator;
+					if (p.label !== undefined) ci.label = p.label;
+					if (p.prefix !== undefined) ci.prefix = p.prefix;
+					if (p.suffix !== undefined) ci.suffix = p.suffix;
+					return ci;
+				}),
+				properties: { noteIndex: c.noteIndex },
+			}));
+			const out = host.engine.rebuildProcessorState(citations, format, []);
+			const byId = new Map(out.map(([id, , text]) => [id, text]));
+			return citations.map((c) => (byId.get(c.citationID) ?? "").trim());
+		} finally {
+			this.pool.release(host);
+		}
+	}
+
+	/**
+	 * ZotFlow Evo: a style that comes with the plugin, put in the cache as if
+	 * downloaded (from its zotero.org address, so updates find it) — unless
+	 * it is there already.
+	 */
+	async seedStyle(id: string, xml: string): Promise<boolean> {
+		if (await this.styles.getLocal(id)) return false;
+		await this.styles.cacheFetched(id, this.styles.styleUrl(id), xml, {
+			explicit: true,
+		});
+		return true;
 	}
 
 	async createContext(opts: RenderOptions): Promise<BibliographyContext> {

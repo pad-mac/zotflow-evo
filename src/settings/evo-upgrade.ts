@@ -37,6 +37,13 @@ export function upgradeEvoSettings(settings: ZotFlowSettings): void {
     ) {
         settings.evoCollectionColumns = [...DEFAULT_COLLECTION_COLUMNS];
     }
+    // Beta.17: Chicago author-date (it comes with the plugin) instead of
+    // upstream's APA, once.
+    if (!settings.evoChicagoDefault) {
+        if (settings.cslDefaultStyleId === "apa")
+            settings.cslDefaultStyleId = "chicago-author-date";
+        settings.evoChicagoDefault = true;
+    }
     // Until beta.9 one page filter for all PDFs; now one per PDF.
     delete (settings as unknown as Record<string, unknown>).readerPdfFilter;
 }

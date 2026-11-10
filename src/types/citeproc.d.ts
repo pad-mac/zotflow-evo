@@ -72,6 +72,12 @@ declare module "citeproc" {
 			format: string
 		): string;
 		restoreProcessorState(citations?: Citation[]): void;
+		/** Citations in document order: [citationID, noteIndex, text] for each. */
+		rebuildProcessorState(
+			citations: Citation[],
+			mode?: string,
+			uncitedItemIDs?: string[]
+		): [string, number, string][];
 		setOutputFormat(mode: string): void;
 	}
 

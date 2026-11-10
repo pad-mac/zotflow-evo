@@ -191,6 +191,14 @@ export interface ZotFlowSettings {
     evoItemPaneOutline: boolean;
     /** ZotFlow Evo: a new book section's annotations are removed from the book's PDF (moved, not copied). */
     evoBookSectionRemoveAnnotations: boolean;
+    /** ZotFlow Evo: footnotes numbered [^1], [^2], … in order, kept so automatically. */
+    evoFootnotes: boolean;
+    /** ZotFlow Evo: a part's footnotes stand before the next heading of this level or higher (1–6). */
+    evoFootnoteLevel: number;
+    /** ZotFlow Evo: the CSL style citation footnotes are written in (a note style). */
+    evoFootnoteStyle: string;
+    /** ZotFlow Evo: set once the default style was made Chicago author-date (beta.17). */
+    evoChicagoDefault: boolean;
     /** ZotFlow Evo: group libraries whose files are in a shared folder (utils/evo-shared-folder.ts); passwords in SecretStorage. */
     evoGroupFolders: SharedFolderConfig[];
     /** ZotFlow Evo: the tag each annotation colour gets in source notes (by colour hex, without "#"). */
@@ -347,9 +355,13 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     readerSelectionToolToggle: false,
     evoItemPaneOutline: false,
     evoBookSectionRemoveAnnotations: true,
+    evoFootnotes: true,
+    evoFootnoteLevel: 3,
+    evoFootnoteStyle: "chicago-notes-bibliography",
+    evoChicagoDefault: false,
     evoGroupFolders: [],
     evoAnnotationTagNames: {},
-    cslDefaultStyleId: "apa",
+    cslDefaultStyleId: "chicago-author-date",
     cslDefaultFormat: "markdown",
     cslStylesFolder: "",
 };

@@ -35,7 +35,8 @@ const GROUP = 777;
 const API_KEY = "TESTKEY";
 
 interface CslCall {
-    kind: "citation" | "bibliography";
+    kind: "citation" | "bibliography" | "notes";
+    clusters?: unknown[];
     items: CSLItem[];
     opts: RenderOptions;
     props?: (CiteProps | undefined)[];
@@ -88,6 +89,16 @@ async function setup(over: Partial<ZotFlowSettings> = {}) {
         renderBibliography: (items: CSLItem[], opts: RenderOptions) => {
             cslCalls.push({ kind: "bibliography", items, opts });
             return Promise.resolve(items.map((i) => `bib:${i.id}`));
+        },
+        renderNotes: (
+            items: CSLItem[],
+            clusters: { noteIndex: number; items: { id: string }[] }[],
+            opts: RenderOptions,
+        ) => {
+            cslCalls.push({ kind: "notes", items, opts, clusters });
+            return Promise.resolve(
+                clusters.map((c) => `note:${c.items.map((i) => i.id).join("+")}`),
+            );
         },
     } as unknown as CslRenderWorkerService;
 
@@ -1767,5 +1778,67 @@ describe("ZotFlow Evo: the list-format default note", () => {
         expect(fm).not.toMatch(/^collections:/m);
         expect(fm).toMatch(/^DOI: /m);
         expect(fm).toMatch(/^publicationTitle: /m);
+    });
+});
+
+describe("ZotFlow Evo: numbered citation footnotes (evoRenderNotes)", () => {
+    test("keys found by citekey, rendered in note order; a note with a key cited nowhere stays empty", async () => {
+        await seedArticle();
+        await seedItem({
+            libraryID: LIB,
+            key: "BOOK0001",
+            itemType: "book",
+            citationKey: "roe2021",
+            csljson: {
+                id: "BOOK0001",
+                type: "book",
+                title: "Order of Heaven: Angels in Italy",
+            } as any,
+        } as any);
+
+        const out = await service.evoRenderNotes(
+            [
+                { noteIndex: 1, items: [{ citekey: "doe2020", locator: "23", prefix: "see" }] },
+                { noteIndex: 2, items: [{ citekey: "nobody1999", locator: "", prefix: "" }] },
+                {
+                    noteIndex: 3,
+                    items: [
+                        { citekey: "roe2021", locator: "", prefix: "" },
+                        { citekey: "doe2020", locator: "45", prefix: "" },
+                    ],
+                },
+            ],
+            { styleId: "chicago-notes-bibliography" },
+        );
+
+        expect(out.missing).toEqual(["nobody1999"]);
+        expect(out.notes).toEqual([
+            `note:${LIB}/PARENT01`,
+            null,
+            `note:${LIB}/BOOK0001+${LIB}/PARENT01`,
+        ]);
+        expect(cslCalls).toHaveLength(1);
+        const call = cslCalls[0]!;
+        expect(call.opts).toMatchObject({ styleId: "chicago-notes-bibliography", format: "html" });
+        // Each work once; a short title from the main title when Zotero has none.
+        expect(call.items.map((i) => i.id)).toEqual([`${LIB}/PARENT01`, `${LIB}/BOOK0001`]);
+        expect(call.items[1]!["title-short"]).toBe("Order of Heaven");
+        expect(call.items[0]!["title-short"]).toBeUndefined();
+        expect(call.clusters).toEqual([
+            { noteIndex: 1, items: [{ id: `${LIB}/PARENT01`, locator: "23", label: "page", prefix: "see " }] },
+            {
+                noteIndex: 3,
+                items: [{ id: `${LIB}/BOOK0001` }, { id: `${LIB}/PARENT01`, locator: "45", label: "page" }],
+            },
+        ]);
+    });
+
+    test("a Zotero item key works as a citekey too", async () => {
+        await seedArticle("ABCD2345");
+        const out = await service.evoRenderNotes(
+            [{ noteIndex: 1, items: [{ citekey: "ABCD2345", locator: "", prefix: "" }] }],
+            { styleId: "chicago-notes-bibliography" },
+        );
+        expect(out).toEqual({ notes: [`note:${LIB}/ABCD2345`], missing: [] });
     });
 });

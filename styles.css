@@ -5316,3 +5316,89 @@ body.minimal-focus-mode
     justify-content: flex-end;
     gap: 8px;
 }
+
+/* ----- Numbered footnotes (beta.17) ----- */
+
+/* A reference: a small raised [n], like Obsidian's own footnotes. */
+.zotflow-fn-ref {
+    padding-inline: 0.05em;
+    color: var(--text-accent);
+    font-size: 0.75em;
+    font-variant-numeric: tabular-nums;
+    line-height: 0;
+    vertical-align: super;
+    cursor: pointer;
+    transition: color 90ms ease-out;
+}
+
+/* The brackets around the number (the text); a word joiner first, so the
+   marker stays on the line of the word before it. CodeMirror's images
+   beside the hidden "[^" and "]" would let the line break there: not shown
+   (the cursor is never beside them: then the source shows). */
+.zotflow-fn-ref {
+    white-space: nowrap;
+}
+
+.zotflow-fn-ref > img.cm-widgetBuffer {
+    display: none;
+}
+
+.zotflow-fn-ref::before {
+    content: "\2060[";
+}
+
+.zotflow-fn-ref::after {
+    content: "]";
+}
+
+.zotflow-fn-ref:hover {
+    color: var(--text-accent-hover);
+}
+
+.zotflow-fn-ref.is-missing {
+    color: var(--text-error);
+}
+
+/* A part's notes: smaller, subdued, a short rule above the first, the
+   number hanging before the text. */
+.markdown-source-view.mod-cm6 .cm-line.zotflow-fn-def {
+    padding-inline-start: 1.8em;
+    color: var(--text-muted);
+    font-size: 0.875em;
+    text-indent: -1.8em;
+}
+
+.markdown-source-view.mod-cm6 .cm-line.zotflow-fn-def.is-first {
+    padding-top: 0.6em;
+    background-image: linear-gradient(
+        var(--background-modifier-border),
+        var(--background-modifier-border)
+    );
+    background-position: top left;
+    background-repeat: no-repeat;
+    background-size: min(30%, 12em) 1px;
+}
+
+.zotflow-fn-num {
+    display: inline-block;
+    min-width: 1.8em;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    text-indent: 0;
+    cursor: pointer;
+}
+
+.zotflow-fn-num:hover {
+    color: var(--text-muted);
+}
+
+.zotflow-fn-note {
+    text-indent: 0;
+}
+
+/* Cites a key not found in the library here. */
+.zotflow-fn-unknown {
+    text-decoration: underline wavy var(--text-error);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}

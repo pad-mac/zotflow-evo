@@ -67,6 +67,7 @@ import {
 import { NOTE_EDITOR_VIEW_TYPE, NoteEditorView } from "ui/note-editor/view";
 import { ZotFlowRegionDecorationExtension } from "ui/editor/zotflow-region-decoration-extension";
 import { CitationSuggest } from "ui/editor/citation-suggest";
+import { registerEvoFootnotes } from "ui/editor/evo-footnotes";
 import { fireAndForgetIn } from "utils/fire-and-forget";
 import { focusReaderLeaf } from "utils/reader-leaf-navigation";
 
@@ -227,6 +228,9 @@ export default class ZotFlow extends Plugin {
         this.registerEditorExtension([
             ZotFlowRegionDecorationExtension(isDefaultLocked),
         ]);
+
+        // ZotFlow Evo: numbered footnotes
+        registerEvoFootnotes(this);
 
         // Register drop-to-cite handler
         this.registerEvent(

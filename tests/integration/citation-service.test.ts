@@ -43,6 +43,8 @@ interface MockState {
     renderCalls: { kind: string; notePath: string }[];
     /** Make `renderCitationTemplate` throw. */
     templateThrows: boolean;
+    /** ZotFlow Evo: numbered footnotes (off: upstream's template footnotes). */
+    evoFootnotes: boolean;
 }
 
 const state = vi.hoisted(() => ({
@@ -55,12 +57,16 @@ const state = vi.hoisted(() => ({
     templates: new Map(),
     renderCalls: [],
     templateThrows: false,
+    evoFootnotes: false,
 })) as unknown as MockState;
 
 vi.mock("services/services", () => ({
     services: {
         get app() {
             return state.app;
+        },
+        get settings() {
+            return { evoFootnotes: state.evoFootnotes };
         },
         indexService: {
             getFileByKey: (key: string) => {
@@ -144,6 +150,7 @@ beforeEach(() => {
     state.templates.clear();
     state.renderCalls.length = 0;
     state.templateThrows = false;
+    state.evoFootnotes = false;
     service = new CitationService();
 });
 
@@ -430,5 +437,41 @@ describe("footnote", () => {
         expect(state.notices).toEqual([
             expect.objectContaining({ type: "warning" }),
         ]);
+    });
+});
+
+describe("ZotFlow Evo: numbered footnotes", () => {
+    beforeEach(() => {
+        state.evoFootnotes = true;
+    });
+
+    it("a footnote whose definition is the citation: key and pages, no template", async () => {
+        const result = await service.resolve(
+            ref([
+                { id: "A1", pageLabel: "13" },
+                { id: "A2", pageLabel: "14" },
+                { id: "A3", pageLabel: "13" },
+                { id: "A4" },
+            ]),
+            "footnote",
+        );
+        const label = /^\[\^(zfc[a-z0-9]+)\]$/.exec(result!.citation)?.[1];
+        expect(label).toBeDefined();
+        expect(result!.footnoteDef).toBe(`[^${label}]: @smith2024, 13, 14`);
+        expect(result!.evoCite).toEqual({ citekey: "smith2024", locator: "13, 14" });
+        expect(state.renderCalls).toEqual([]);
+    });
+
+    it("without pages, and without a citekey (the item key)", async () => {
+        state.item = item({ citationKey: "" });
+        const result = await service.resolve(ref(), "footnote");
+        expect(result!.footnoteDef).toMatch(new RegExp(`^\\[\\^zfc[a-z0-9]+\\]: @${KEY}$`));
+        expect(result!.evoCite).toEqual({ citekey: KEY, locator: "" });
+    });
+
+    it("two footnotes inserted quickly get labels of their own", async () => {
+        const a = await service.resolve(ref(), "footnote");
+        const b = await service.resolve(ref(), "footnote");
+        expect(a!.citation).not.toBe(b!.citation);
     });
 });

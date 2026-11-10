@@ -112,7 +112,10 @@ export class ZotFlowSettingTab extends PluginSettingTab {
             {
                 type: "page",
                 name: "Citation",
-                items: new CitationSection(this.plugin).getDefinitions(),
+                items: [
+                    ...new CitationSection(this.plugin).getDefinitions(),
+                    ...pick("Numbered footnotes"),
+                ],
             },
             {
                 type: "page",

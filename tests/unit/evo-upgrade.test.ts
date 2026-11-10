@@ -63,4 +63,19 @@ describe("upgradeEvoSettings", () => {
         expect("readerPdfFilter" in s).toBe(false);
         expect(s.readerPdfFilters).toEqual({});
     });
+
+    it("Chicago author-date instead of APA, once; another style chosen stays", () => {
+        expect(DEFAULT_SETTINGS.cslDefaultStyleId).toBe("chicago-author-date");
+        const apa = settings({ cslDefaultStyleId: "apa", evoChicagoDefault: false });
+        upgradeEvoSettings(apa);
+        expect(apa.cslDefaultStyleId).toBe("chicago-author-date");
+        expect(apa.evoChicagoDefault).toBe(true);
+        // APA chosen again afterwards: kept.
+        apa.cslDefaultStyleId = "apa";
+        upgradeEvoSettings(apa);
+        expect(apa.cslDefaultStyleId).toBe("apa");
+        const ieee = settings({ cslDefaultStyleId: "ieee", evoChicagoDefault: false });
+        upgradeEvoSettings(ieee);
+        expect(ieee.cslDefaultStyleId).toBe("ieee");
+    });
 });

@@ -48,6 +48,7 @@ import {
 import { attachmentKind, choosePrimaryAttachment } from "utils/evo-library-model";
 import { ZOTERO_FIELDS } from "types/zotero-base-fields";
 import { ITEM_TYPE_CREATORS } from "types/zotero-csl-schema";
+import { mainTitle } from "utils/evo-footnotes";
 import type { NoteAnnotation, NoteOutline, RenderFile } from "utils/evo-source-note";
 import type { OutlineHeading } from "utils/evo-outline-list";
 import {
@@ -622,6 +623,121 @@ export class LibraryTemplateService {
      * a newer one on older content (a stale note taken as current). Read
      * here first when the caller has not taken it.
      */
+    /* ------------------- ZotFlow Evo: numbered footnotes ------------------- */
+
+    /** Citation key → item (cited by `@key`); built when a key is not found. */
+    private citekeys: Map<string, [number, string]> | null = null;
+    private citekeysAt = 0;
+
+    private async citekeyIndex(force: boolean): Promise<Map<string, [number, string]>> {
+        if (this.citekeys && !(force && Date.now() - this.citekeysAt > 10_000))
+            return this.citekeys;
+        const map = new Map<string, [number, string]>();
+        const libs = await db.libraries.toArray();
+        // The personal library first: a key in both is cited from it.
+        libs.sort((a, b) => (a.type === "group" ? 1 : 0) - (b.type === "group" ? 1 : 0));
+        for (const lib of libs) {
+            await db.items
+                .where("[libraryID+itemType+trashed]")
+                .between([lib.id, "", 0], [lib.id, "\uffff", 0])
+                .each((item) => {
+                    const t = item.itemType;
+                    if (t === "attachment" || t === "note" || t === "annotation")
+                        return;
+                    const k = item.citationKey;
+                    if (k && !map.has(k)) map.set(k, [item.libraryID, item.key]);
+                });
+        }
+        this.citekeys = map;
+        this.citekeysAt = Date.now();
+        return map;
+    }
+
+    /** The item a key cites: its citation key, else its Zotero item key. */
+    private async itemForCitekey(
+        citekey: string,
+    ): Promise<[number, string] | null> {
+        let found = (await this.citekeyIndex(false)).get(citekey);
+        if (!found) found = (await this.citekeyIndex(true)).get(citekey);
+        if (found) return found;
+        if (/^[A-Z0-9]{8}$/.test(citekey)) {
+            for (const lib of await db.libraries.toArray()) {
+                const item = await db.items.get([lib.id, citekey]);
+                if (item) return [item.libraryID, item.key];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * ZotFlow Evo: the citation notes of a note (utils/evo-footnotes.ts), in
+     * order, rendered with a note style: a work in full the first time,
+     * short after. Each note's text (HTML), or null when one of its keys
+     * cites nothing here; `missing`: those keys.
+     */
+    async evoRenderNotes(
+        notes: {
+            noteIndex: number;
+            items: { citekey: string; locator: string; prefix: string }[];
+        }[],
+        opts: { styleId: string; locale?: string },
+    ): Promise<{ notes: (string | null)[]; missing: string[] }> {
+        const missing = new Set<string>();
+        const ids = new Map<string, string>();
+        const csl: CSLItem[] = [];
+        for (const note of notes) {
+            for (const it of note.items) {
+                if (ids.has(it.citekey) || missing.has(it.citekey)) continue;
+                const found = await this.itemForCitekey(it.citekey);
+                if (!found) {
+                    missing.add(it.citekey);
+                    continue;
+                }
+                try {
+                    const json = await this.getCslJson(
+                        { libraryID: found[0], key: found[1] },
+                        "footnote",
+                    );
+                    const id = `${found[0]}/${found[1]}`;
+                    ids.set(it.citekey, id);
+                    if (!csl.some((c) => String(c.id) === id)) {
+                        // Later notes cite it short: without a Short Title
+                        // in Zotero, the main title before its subtitle.
+                        const short =
+                            !json["title-short"] && typeof json.title === "string"
+                                ? mainTitle(json.title)
+                                : null;
+                        csl.push({ ...json, id, ...(short ? { "title-short": short } : {}) });
+                    }
+                } catch {
+                    missing.add(it.citekey);
+                }
+            }
+        }
+        const usable = notes
+            .map((n, i) => ({ n, i }))
+            .filter(({ n }) => n.items.every((it) => ids.has(it.citekey)));
+        const out: (string | null)[] = notes.map(() => null);
+        if (usable.length) {
+            const rendered = await this.cslRender.renderNotes(
+                csl,
+                usable.map(({ n }) => ({
+                    noteIndex: n.noteIndex,
+                    items: n.items.map((it) => ({
+                        id: ids.get(it.citekey)!,
+                        ...(it.locator ? { locator: it.locator, label: "page" } : {}),
+                        ...(it.prefix ? { prefix: `${it.prefix} ` } : {}),
+                    })),
+                })),
+                { styleId: opts.styleId, locale: opts.locale, format: "html" },
+            );
+            usable.forEach(({ i }, k) => {
+                out[i] = rendered[k] ?? null;
+            });
+        }
+        return { notes: out, missing: [...missing] };
+    }
+
     async renderLibrarySourceNote(
         item: AnyIDBZoteroItem,
         templateContent: string | null,

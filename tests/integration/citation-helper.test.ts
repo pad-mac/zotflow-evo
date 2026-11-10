@@ -129,6 +129,13 @@ function createEditor(initial = "") {
             const end = to ? posToOffset(to) : start;
             doc = doc.slice(0, start) + text + doc.slice(end);
         },
+        /** One transaction: every change against the document as it was. */
+        transaction: ({ changes }: { changes: { from: Pos; to?: Pos; text: string }[] }) => {
+            const offs = changes
+                .map((c) => ({ from: posToOffset(c.from), to: c.to ? posToOffset(c.to) : posToOffset(c.from), text: c.text }))
+                .sort((a, b) => b.from - a.from);
+            for (const c of offs) doc = doc.slice(0, c.from) + c.text + doc.slice(c.to);
+        },
         /** Move the cursor by (line, ch), as a drop at a position would. */
         placeCursor: (p: Pos) => {
             cursor = p;
@@ -647,5 +654,38 @@ describe("handleEditorDrop", () => {
 
         await vi.waitFor(() => expect(editor.doc).toContain("[@smith]"));
         expect(editor.doc).toBe("body more[@smith]");
+    });
+});
+
+describe("ZotFlow Evo: numbered citation footnotes", () => {
+    const cite = (label: string, citekey: string, locator: string) => ({
+        citation: `[^${label}]`,
+        citekey,
+        footnoteDef: `[^${label}]: @${citekey}${locator ? `, ${locator}` : ""}`,
+        evoCite: { citekey, locator },
+    });
+
+    it("the reference at the cursor, its definition at the end, in one step", () => {
+        const editor = createEditor("Text here.");
+        insertCitationResult(editor, { line: 0, ch: 4 }, cite("zfc1", "smith2024", "13"));
+        expect(editor.doc).toBe("Text[^zfc1] here.\n\n[^zfc1]: @smith2024, 13\n");
+        expect(editor.cursor).toEqual({ line: 0, ch: 11 });
+    });
+
+    it("right after a citation footnote: the work is added to it (one number, several works)", () => {
+        const editor = createEditor("Text[^1] here.\n\n[^1]: @heims1991, 23\n");
+        insertCitationResult(editor, { line: 0, ch: 8 }, cite("zfc2", "smith2024", "13"));
+        expect(editor.doc).toBe("Text[^1] here.\n\n[^1]: @heims1991, 23; @smith2024, 13\n");
+        expect(editor.cursor).toEqual({ line: 0, ch: 8 });
+    });
+
+    it("after a footnote of one's own, or one citing the same work: a footnote of its own", () => {
+        const own = createEditor("Text[^1] here.\n\n[^1]: My remark.\n");
+        insertCitationResult(own, { line: 0, ch: 8 }, cite("zfc3", "smith2024", ""));
+        expect(own.doc).toBe("Text[^1][^zfc3] here.\n\n[^1]: My remark.\n\n\n[^zfc3]: @smith2024\n");
+        const same = createEditor("Text[^1] here.\n\n[^1]: @smith2024, 2\n");
+        insertCitationResult(same, { line: 0, ch: 8 }, cite("zfc4", "smith2024", "3"));
+        expect(same.doc).toContain("Text[^1][^zfc4] here.");
+        expect(same.doc).toContain("[^1]: @smith2024, 2\n");
     });
 });

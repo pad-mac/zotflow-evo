@@ -26,6 +26,11 @@ export interface CitationResult {
     citekey: string;
     /** Footnote definition line (only for footnote format). */
     footnoteDef?: string;
+    /**
+     * ZotFlow Evo: a numbered citation footnote (`[^n]: @key, page`): what
+     * it cites, so the picker can add it to the footnote before the cursor.
+     */
+    evoCite?: { citekey: string; locator: string };
 }
 
 /** Minimal reference to a Zotero item for citation resolution. */
@@ -178,6 +183,27 @@ export class CitationService {
         notePath: string,
     ): Promise<CitationResult> {
         const citekey = input.item.citationKey || input.item.key;
+
+        // ZotFlow Evo: numbered footnotes — the definition is the citation
+        // (`@key, page`), shown as the formatted note; the label is numbered
+        // when it goes in (ui/editor/evo-footnotes.ts).
+        if (services.settings.evoFootnotes) {
+            const pages = [
+                ...new Set(
+                    (input.annotations ?? [])
+                        .map((a) => a.pageLabel)
+                        .filter((p): p is string => !!p),
+                ),
+            ];
+            const locator = pages.join(", ");
+            const label = `zfc${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+            return {
+                citation: `[^${label}]`,
+                citekey,
+                footnoteDef: `[^${label}]: @${citekey}${locator ? `, ${locator}` : ""}`,
+                evoCite: { citekey, locator },
+            };
+        }
 
         // Inline reference — rendered with annotation context (e.g. page number)
         const rendered =

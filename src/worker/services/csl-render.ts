@@ -1,3 +1,4 @@
+import { BUNDLED_STYLES } from "worker/csl/assets/bundled-styles";
 import { db } from "db/db";
 import { proxiedFetch } from "worker/proxied-fetch";
 import { CslRenderService } from "worker/csl";
@@ -70,12 +71,44 @@ export class CslRenderWorkerService {
     private core: CslRenderService;
     private contexts = new Map<string, BibliographyContext>();
 
+    /** ZotFlow Evo: the styles that come with the plugin, in the cache. */
+    private readonly seeded: Promise<void>;
+
     constructor(settings: ZotFlowSettings) {
         this.core = new CslRenderService({
             fetcher: new WorkerFetcher(),
             store: new DexieKVStore(),
             defaultFormat: settings.cslDefaultFormat,
         });
+        this.seeded = this.seedBundledStyles();
+    }
+
+    /**
+     * ZotFlow Evo: put the styles that come with the plugin (Chicago
+     * author-date and notes) in the cache, as if downloaded, when they are
+     * not there (first start, or after the cache was cleared).
+     */
+    private async seedBundledStyles(): Promise<void> {
+        try {
+            for (const [id, xml] of Object.entries(BUNDLED_STYLES)) {
+                await this.core.seedStyle(id, xml);
+            }
+        } catch {
+            // Downloaded when first used, as any other style.
+        }
+    }
+
+    /**
+     * ZotFlow Evo: a document's notes in order (utils/evo-footnotes.ts): a
+     * note style gives each work in full the first time, short after.
+     */
+    async renderNotes(
+        items: CSLItem[],
+        clusters: { noteIndex: number; items: (CiteProps & { id: string })[] }[],
+        opts: RenderOptions,
+    ): Promise<string[]> {
+        await this.seeded;
+        return this.core.renderNotes(items, clusters, opts);
     }
 
     updateSettings(settings: ZotFlowSettings): void {
@@ -154,7 +187,8 @@ export class CslRenderWorkerService {
 
     /* --------------------- style / locale management ------------------- */
 
-    ensureStyle(id: string): Promise<Availability> {
+    async ensureStyle(id: string): Promise<Availability> {
+        await this.seeded;
         return this.core.ensureStyle(id);
     }
 
@@ -162,7 +196,12 @@ export class CslRenderWorkerService {
         return this.core.resolveDeps(id);
     }
 
-    listStyles(): Promise<StyleInfo[]> {
+    async listStyles(): Promise<StyleInfo[]> {
+        await this.seeded;
+        return this.listStylesNow();
+    }
+
+    private listStylesNow(): Promise<StyleInfo[]> {
         return this.core.listStyles();
     }
 

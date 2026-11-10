@@ -4,6 +4,7 @@
  * library browser, automatic sync.
  * See FORK.md.
  */
+import { workerBridge } from "bridge";
 import { applyStripTabMode } from "ui/evo-strip/follow";
 import {
     BUNDLED_OCR_LANGUAGES,
@@ -352,24 +353,84 @@ export class EvoSection {
             },
             {
                 type: "group",
+                heading: "Numbered footnotes",
+                items: [
+                    {
+                        name: "Numbered footnotes",
+                        desc: "Footnotes are [^1], [^2], … in the order they stand, kept so as you write (inserting, deleting, moving and pasting renumber them; one undo takes back an edit with its renumbering). Each part's footnotes stand at its end, shown as notes; a footnote whose text is citations (@key, page; @key) shows the formatted note. Citation footnotes from the picker (Ctrl/Cmd+Enter, or Enter when footnotes are the default) right after a footnote join it. Commands: Insert footnote, Renumber footnotes. ZotFlow's source notes are left alone.",
+                        control: { type: "toggle", key: "evoFootnotes" },
+                    },
+                    {
+                        name: "Footnotes stand before",
+                        desc: "The next heading of this level or higher ends a part; its footnotes stand before it (or at the end of the note).",
+                        render: (setting) => {
+                            setting.addDropdown((dropdown) => {
+                                for (let l = 1; l <= 6; l++)
+                                    dropdown.addOption(
+                                        String(l),
+                                        l === 1
+                                            ? "# headings only"
+                                            : `${"#".repeat(l)} or higher`,
+                                    );
+                                dropdown
+                                    .setValue(String(this.plugin.settings.evoFootnoteLevel))
+                                    .onChange(async (value) => {
+                                        this.plugin.settings.evoFootnoteLevel = Number(value);
+                                        await this.plugin.saveSettings();
+                                    });
+                            });
+                        },
+                    },
+                    {
+                        name: "Citation style of the notes",
+                        desc: "A note style: a work in full in its first footnote, short after (Chicago notes and bibliography comes with the plugin). Others: the CSL tab of the Activity Center, or a .csl file in the custom styles folder.",
+                        render: (setting) => {
+                            setting.addDropdown((dropdown) => {
+                                const current = this.plugin.settings.evoFootnoteStyle;
+                                dropdown.addOption(current, current);
+                                dropdown.setValue(current);
+                                dropdown.onChange(async (value) => {
+                                    this.plugin.settings.evoFootnoteStyle = value;
+                                    await this.plugin.saveSettings();
+                                });
+                                void workerBridge.cslRender
+                                    .listStyles()
+                                    .then((styles) => {
+                                        const notes = styles.filter(
+                                            (s) =>
+                                                !s.dependent
+                                                    ? s.citationFormat === "note"
+                                                    : true,
+                                        );
+                                        dropdown.selectEl.empty();
+                                        if (!notes.some((s) => s.id === current))
+                                            dropdown.addOption(current, `${current} (not downloaded)`);
+                                        for (const s of notes)
+                                            dropdown.addOption(
+                                                s.id,
+                                                s.title ? `${s.title} (${s.id})` : s.id,
+                                            );
+                                        dropdown.setValue(current);
+                                    })
+                                    .catch(() => {
+                                        // Keep the current one.
+                                    });
+                            });
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
                 heading: "Book sections",
                 items: [
                     {
                         name: "Remove the annotations from the book's PDF",
                         desc: "A book section made from an outline heading (right-click it in the item pane or the note strip) gets its pages as a PDF of its own, and the annotations on them go with it. On, they are taken off the book's PDF, so each annotation is in one place only (overviews and source notes show it once); off, the book keeps them too.",
-                        render: (setting) =>
-                            setting.addToggle((toggle) =>
-                                toggle
-                                    .setValue(
-                                        this.plugin.settings
-                                            .evoBookSectionRemoveAnnotations,
-                                    )
-                                    .onChange(async (value) => {
-                                        this.plugin.settings.evoBookSectionRemoveAnnotations =
-                                            value;
-                                        await this.plugin.saveSettings();
-                                    }),
-                            ),
+                        control: {
+                            type: "toggle",
+                            key: "evoBookSectionRemoveAnnotations",
+                        },
                     },
                 ],
             },

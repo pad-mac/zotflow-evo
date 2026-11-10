@@ -51,7 +51,12 @@ export class CitationSuggest extends EditorSuggest<SuggestionItem> {
         this.setInstructions([
             { command: "↵", purpose: "Insert default format" },
             { command: "⇧ ↵", purpose: "Pandoc [@citekey]" },
-            { command: "⌘/Ctrl ↵", purpose: "Footnote [^citekey]" },
+            {
+                command: "⌘/Ctrl ↵",
+                purpose: services.settings.evoFootnotes
+                    ? "Footnote [n] (after a footnote: added to it)"
+                    : "Footnote [^citekey]",
+            },
             { command: "⌥/Alt ↵", purpose: "Wikilink [[@citekey]]" },
             { command: "⌘/Ctrl ⇧ ↵", purpose: "Citation key @citekey" },
         ]);

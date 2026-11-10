@@ -1,4 +1,5 @@
 import { services } from "services/services";
+import { formatCluster, parseCluster, scanFootnotes } from "utils/evo-footnotes";
 import { handleReaderDrop } from "ui/editor/evo-drop";
 import { handleSourceLinkDrop } from "ui/editor/evo-link-drop";
 
@@ -174,6 +175,11 @@ export function insertCitationResult(
     pos: EditorPosition,
     result: CitationResult,
 ): void {
+    // ZotFlow Evo: numbered footnotes.
+    if (result.evoCite && result.footnoteDef) {
+        insertNumberedCitation(editor, pos, result);
+        return;
+    }
     const insertOffset = editor.posToOffset(pos);
     editor.replaceRange(result.citation, pos);
 
@@ -264,4 +270,53 @@ export function handleEditorDrop(
                 "Failed to insert citation.",
             );
         });
+}
+
+/**
+ * ZotFlow Evo: a citation footnote. Right after a footnote that cites
+ * (`[^3]` and the cursor), the work joins it (`; @key`: one footnote,
+ * several works); else a new footnote — reference and definition in one
+ * step, numbered and placed by the editor (ui/editor/evo-footnotes.ts).
+ */
+function insertNumberedCitation(
+    editor: Editor,
+    pos: EditorPosition,
+    result: CitationResult,
+): void {
+    const cite = result.evoCite!;
+    const text = editor.getValue();
+    const at = editor.posToOffset(pos);
+    const before = /\[\^(\d+)\]$/.exec(text.slice(Math.max(0, at - 24), at));
+    if (before) {
+        const def = scanFootnotes(text).defs.find((d) => d.label === before[1]);
+        const items = def ? parseCluster(def.body) : null;
+        if (def && items && !items.some((i) => i.citekey === cite.citekey)) {
+            const added = formatCluster([
+                ...items,
+                { citekey: cite.citekey, locator: cite.locator, prefix: "" },
+            ]);
+            editor.transaction({
+                changes: [
+                    {
+                        from: editor.offsetToPos(def.bodyFrom),
+                        to: editor.offsetToPos(def.to),
+                        text: added,
+                    },
+                ],
+            });
+            editor.setCursor(editor.offsetToPos(at));
+            return;
+        }
+    }
+    const endOfDoc = editor.offsetToPos(text.length);
+    editor.transaction({
+        changes: [
+            { from: pos, text: result.citation },
+            { from: endOfDoc, text: `\n\n${result.footnoteDef}\n` },
+        ],
+    });
+    // After the reference (its label is a number now).
+    const now = editor.getValue();
+    const ref = /^\[\^[^\]\s^]+\]/.exec(now.slice(at));
+    editor.setCursor(editor.offsetToPos(at + (ref ? ref[0].length : 0)));
 }
