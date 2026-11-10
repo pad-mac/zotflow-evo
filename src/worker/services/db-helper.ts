@@ -82,6 +82,35 @@ export class DbHelperService {
     }
 
     /**
+     * ZotFlow Evo: the works behind attachments (the item picker's "Open"):
+     * an attachment's parent item, a standalone attachment itself; in the
+     * order asked, each once, trashed ones left out.
+     */
+    async getCitedItems(
+        refs: { libraryID: number; key: string }[],
+    ): Promise<AnyIDBZoteroItem[]> {
+        const out: AnyIDBZoteroItem[] = [];
+        const seen = new Set<string>();
+        for (const ref of refs) {
+            const attachment = await db.items.get([ref.libraryID, ref.key]);
+            if (!attachment) continue;
+            const parentKey =
+                attachment.itemType === "attachment" && attachment.parentItem
+                    ? attachment.parentItem
+                    : "";
+            const item = parentKey
+                ? await db.items.get([ref.libraryID, parentKey])
+                : attachment;
+            if (!item || item.trashed) continue;
+            const id = `${item.libraryID}:${item.key}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            out.push(item);
+        }
+        return out;
+    }
+
+    /**
      * Look up an attachment item by library + key.
      * Returns `undefined` if the item doesn't exist or isn't an attachment.
      */

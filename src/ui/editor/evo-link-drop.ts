@@ -4,12 +4,17 @@
  * further ones each on a line of its own below. In a list (or a quote) the
  * further lines continue it.
  *
- * A drop with a modifier key held is left to the citation formats of
- * `citation-helper.ts`. See FORK.md.
+ * Shift held: one numbered footnote at the drop citing them all, Pandoc's
+ * citation without a page (`[^1]: [@a; @b]`). Another key held is left to
+ * the citation formats of `citation-helper.ts`. See FORK.md.
  */
 import { TFile } from "obsidian";
 
 import { services } from "services/services";
+import { ZOTFLOW_CITATION_MIME, insertCitationResult } from "ui/editor/citation-helper";
+import { formatCluster, type ClusterItem } from "utils/evo-footnotes";
+
+import type { CitationResult } from "services/citation-service";
 
 import type { Editor, MarkdownFileInfo, MarkdownView } from "obsidian";
 
@@ -106,10 +111,21 @@ export function handleSourceLinkDrop(
     info: MarkdownView | MarkdownFileInfo,
 ): boolean {
     if (evt.defaultPrevented) return false;
-    if (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey) return false;
+    const shiftOnly = evt.shiftKey && !evt.ctrlKey && !evt.metaKey && !evt.altKey;
+    if (!shiftOnly && (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey)) return false;
     const raw = evt.dataTransfer?.getData(ZOTFLOW_SOURCE_LINKS_MIME);
     const payload = raw ? parseSourceLinksPayload(raw) : null;
     if (!payload) return false;
+
+    if (shiftOnly) {
+        // A drag carrying a citation of its own (the sidebar's item tree) is
+        // left to the citation formats; without numbered footnotes too.
+        if (evt.dataTransfer?.getData(ZOTFLOW_CITATION_MIME)) return false;
+        if (!services.settings.evoFootnotes) return false;
+        evt.preventDefault();
+        dropAsFootnote(editor, payload.items);
+        return true;
+    }
 
     evt.preventDefault();
     const pos = editor.getCursor();
@@ -164,4 +180,38 @@ export function handleSourceLinkDrop(
         );
     });
     return true;
+}
+
+/**
+ * ZotFlow Evo: items dropped with Shift — one numbered footnote at the drop
+ * citing them all (`[^1]: [@a; @b]`), numbered and placed as any other
+ * (right after a citation footnote: the works join it).
+ */
+function dropAsFootnote(editor: Editor, items: SourceLinksPayload["items"]): void {
+    const pos = editor.getCursor();
+    const baselineDoc = editor.getValue();
+    (async () => {
+        const results: CitationResult[] = [];
+        for (const item of items) {
+            const result = await services.citationService.resolve(item, "footnote");
+            if (result?.evoCite) results.push(result);
+        }
+        const first = results[0];
+        if (!first) {
+            services.notificationService.notify("warning", "Could not cite the items.");
+            return;
+        }
+        const cites: ClusterItem[] = results.map((r) => r.evoCite!);
+        const combined: CitationResult = {
+            ...first,
+            footnoteDef: `${first.citation}: ${formatCluster(cites)}`,
+            evoCite: cites[0],
+            evoCites: cites,
+        };
+        const at = editor.getValue() === baselineDoc ? pos : editor.getCursor();
+        insertCitationResult(editor, at, combined);
+    })().catch((error) => {
+        services.logService.error("Failed to insert the citation footnote", "EvoLinkDrop", error);
+        services.notificationService.notify("error", "Could not insert the footnote.");
+    });
 }

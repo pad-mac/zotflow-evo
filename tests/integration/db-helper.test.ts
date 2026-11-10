@@ -604,3 +604,27 @@ describe("getItemPaths", () => {
         expect(paths["1:ARTICLE1"]).toEqual(["My Library/Self/"]);
     });
 });
+
+describe("ZotFlow Evo: the works behind open attachments (getCitedItems)", () => {
+    beforeEach(async () => {
+        h = await createServiceHarness();
+    });
+
+    test("an attachment's parent, a standalone attachment itself; in order, each once, not trashed", async () => {
+        await seedItem({ libraryID: USER_ID, key: "BOOK0001", itemType: "book" });
+        await seedItem({ libraryID: USER_ID, key: "PDF00001", itemType: "attachment", parentItem: "BOOK0001" });
+        await seedItem({ libraryID: USER_ID, key: "PDF00002", itemType: "attachment", parentItem: "BOOK0001" });
+        await seedItem({ libraryID: USER_ID, key: "LONEPDF1", itemType: "attachment", parentItem: "" });
+        await seedItem({ libraryID: USER_ID, key: "GONE0001", itemType: "book", trashed: 1 });
+        await seedItem({ libraryID: USER_ID, key: "PDF00003", itemType: "attachment", parentItem: "GONE0001" });
+
+        const items = await h.dbHelper.getCitedItems([
+            { libraryID: USER_ID, key: "LONEPDF1" },
+            { libraryID: USER_ID, key: "PDF00001" },
+            { libraryID: USER_ID, key: "PDF00002" },
+            { libraryID: USER_ID, key: "PDF00003" },
+            { libraryID: USER_ID, key: "MISSING1" },
+        ]);
+        expect(items.map((i) => i.key)).toEqual(["LONEPDF1", "BOOK0001"]);
+    });
+});

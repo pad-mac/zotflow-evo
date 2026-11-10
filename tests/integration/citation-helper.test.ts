@@ -37,7 +37,7 @@ import type { AnnotationJSON } from "types/zotero-reader";
 
 interface MockState {
     defaultCitationFormat: string;
-    citation: { citation: string; citekey: string; footnoteDef?: string } | null;
+    citation: { citation: string; citekey: string; footnoteDef?: string; evoCite?: unknown } | null;
     resolveRejects: boolean;
     resolveCalls: { payload: unknown; format: string }[];
     logs: { level: string; message: string }[];
@@ -337,10 +337,11 @@ describe("resolveFormatFromModifiers", () => {
     it.each([
         ["ctrl+shift", { ctrlKey: true, shiftKey: true }, "citekey"],
         ["cmd+shift", { metaKey: true, shiftKey: true }, "citekey"],
-        ["shift", { shiftKey: true }, "wikilink"],
+        // ZotFlow Evo: Shift a footnote, Alt Shift's wikilink (embed) before.
+        ["shift", { shiftKey: true }, "footnote"],
         ["ctrl", { ctrlKey: true }, "footnote"],
         ["cmd", { metaKey: true }, "footnote"],
-        ["alt", { altKey: true }, "pandoc"],
+        ["alt", { altKey: true }, "wikilink"],
     ])("%s selects %s", (_label, m, expected) => {
         // The configured default must differ from the expected outcome, or a
         // deleted modifier branch would fall through to it and look correct.
@@ -366,7 +367,7 @@ describe("resolveFormatFromModifiers", () => {
     it("ignores alt once a higher-priority modifier is held", () => {
         expect(
             resolveFormatFromModifiers(mods({ shiftKey: true, altKey: true })),
-        ).toBe("wikilink");
+        ).toBe("footnote");
     });
 });
 
@@ -588,6 +589,47 @@ describe("handleEditorDrop", () => {
         await vi.waitFor(() =>
             expect(state.resolveCalls[0]!.format).toBe("citekey"),
         );
+    });
+
+    it("ZotFlow Evo: a highlight dropped with Shift — a numbered footnote at the drop, its page in Pandoc's citation", async () => {
+        const item = clusterItem("smith", { label: "page", locator: "13" });
+        state.citation = {
+            citation: "[^zfc1]",
+            citekey: "smith",
+            footnoteDef: `[^zfc1]: ${formatCluster([item])}`,
+            evoCite: item,
+        };
+        const editor = createEditor("Some text here.");
+        editor.placeCursor({ line: 0, ch: 9 });
+        const evt = createDropEvent(
+            JSON.stringify({
+                type: "zotflow-citation",
+                libraryID: 1,
+                key: "K",
+                evoSource: "highlight",
+                annotations: [{ id: "A1", type: "highlight", pageLabel: "13", text: "quoted" }],
+            }),
+            { shiftKey: true },
+        );
+
+        handleEditorDrop(evt as never, editor, info);
+
+        // Not the highlight's quote (no key held): the citation, as a footnote.
+        await vi.waitFor(() => expect(state.resolveCalls[0]!.format).toBe("footnote"));
+        await vi.waitFor(() =>
+            expect(editor.doc).toBe("Some text[^zfc1] here.\n\n[^zfc1]: [@smith, p. 13]\n"),
+        );
+    });
+
+    it("ZotFlow Evo: Alt gives what Shift gave before (the wikilink, an embed)", async () => {
+        state.citation = { citation: "![[Smith#^a1]]", citekey: "smith" };
+        const editor = createEditor("body");
+        const evt = createDropEvent(
+            JSON.stringify({ type: "zotflow-citation", libraryID: 1, key: "K" }),
+            { altKey: true },
+        );
+        handleEditorDrop(evt as never, editor, info);
+        await vi.waitFor(() => expect(state.resolveCalls[0]!.format).toBe("wikilink"));
     });
 
     it("inserts nothing when the citation cannot be resolved", async () => {

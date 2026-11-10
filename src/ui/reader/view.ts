@@ -46,7 +46,8 @@ import { noteLocalEdit } from "services/evo-auto-sync";
 import { redirectDuplicateReaderLeaf } from "utils/reader-leaf-navigation";
 
 /** View type identifier for the Zotero cloud reader view. */
-export const ZOTERO_READER_VIEW_TYPE = "zotflow-zotero-reader-view";
+import { ZOTERO_READER_VIEW_TYPE } from "ui/reader/view-type";
+export { ZOTERO_READER_VIEW_TYPE };
 
 interface ReaderViewState extends Record<string, unknown> {
     libraryID: number;

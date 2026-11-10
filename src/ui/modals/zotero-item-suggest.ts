@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 import { workerBridge } from "bridge";
+import { openReaderRefs } from "ui/modals/open-readers";
 import { services } from "services/services";
 import { parseSearchQuery, splitHighlight } from "utils/search-query";
 import type { SearchResult } from "obsidian";
@@ -39,7 +40,7 @@ export class ZoteroItemSuggest {
     /** Display titles, from the user's template. */
     displayTitles: Record<string, string> = {};
     /**
-     * Group labels ("Best Match", …), keyed by the first suggestion of their
+     * Group labels ("Best match", …), keyed by the first suggestion of their
      * group. A label is drawn above that suggestion, not as a row of its own:
      * a row would be one the list can select (the first row starts selected,
      * so Enter would pick the label).
@@ -56,22 +57,41 @@ export class ZoteroItemSuggest {
             let found: AnyIDBZoteroItem[] = [];
             let label = "";
 
+            // ZotFlow Evo: before the recently viewed, the works open in a
+            // reader tab, the one in front first.
+            let open: AnyIDBZoteroItem[] = [];
             if (!query) {
+                // Without it (it failed), the list as before.
+                try {
+                    const refs = openReaderRefs(services.app);
+                    open = refs.length
+                        ? (await workerBridge.dbHelper.getCitedItems(refs)).filter((item) =>
+                              this.shouldIncludeItem(item),
+                          )
+                        : [];
+                } catch (e) {
+                    services.logService.error("Could not list the open readers", "ZoteroItemSuggest", e);
+                }
+                const isOpen = new Set(open.map((i) => `${i.libraryID}:${i.key}`));
                 found = await workerBridge.search.getRecentItems(limit);
-                label = "Recent Viewed";
+                label = "Recently viewed";
                 if (found.length === 0) {
                     found =
                         await workerBridge.search.getRecentlyAddedItems(limit);
-                    label = "Recently Added";
+                    label = "Recently added";
                 }
+                found = found.filter((i) => !isOpen.has(`${i.libraryID}:${i.key}`));
             } else {
                 found = await workerBridge.search.searchItems(query, limit);
-                label = "Best Match";
+                label = "Best match";
             }
 
-            const zItems = found.filter((item) => this.shouldIncludeItem(item));
+            const listed = found.filter((item) => this.shouldIncludeItem(item));
+            const zItems = [...open, ...listed].slice(0, Math.max(limit, open.length));
             const items: SuggestionItem[] = zItems;
-            if (zItems[0]) this.setGroupLabel(zItems[0], label);
+            if (open[0]) this.setGroupLabel(open[0], "Open");
+            const firstListed = zItems[open.length];
+            if (firstListed) this.setGroupLabel(firstListed, label);
 
             if (zItems.length > 0) {
                 const refs = zItems.map((i) => ({
@@ -211,14 +231,17 @@ export class ZoteroItemSuggest {
         // on hover).
         const paths = this.itemPaths[`${zItem.libraryID}:${zItem.key}`];
         if (paths && paths.length > 0) {
+            // A path is "Library/Collection/…/Collection/" (the worker's
+            // getItemPaths; "Library/" for an item in none: its library).
+            const segments = paths.map((p) =>
+                p.split("/").map((s) => s.trim()).filter(Boolean),
+            );
             const names = [
-                ...new Set(
-                    paths.map((p) => p.split("/").pop()!.trim()).filter(Boolean),
-                ),
+                ...new Set(segments.map((s) => s[s.length - 1] ?? "").filter(Boolean)),
             ];
             const collsEl = bottomRow.createDiv({
                 cls: "zotflow-suggest-colls",
-                attr: { title: paths.join("\n") },
+                attr: { title: segments.map((s) => s.join(" / ")).join("\n") },
             });
             setIcon(collsEl.createSpan({ cls: "zotflow-suggest-colls-icon" }), "library");
             const namesEl = collsEl.createSpan({ cls: "zotflow-suggest-colls-names" });

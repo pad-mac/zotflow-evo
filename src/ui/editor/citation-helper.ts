@@ -113,12 +113,13 @@ export function parseZotFlowCitationPayload(
 }
 
 /**
- * Determine the citation format from keyboard modifier keys.
- * Mirrors the CitationSuggest key mapping for consistency:
+ * The citation format of a drop (a highlight or comment from the reader, an
+ * item from the library) from the keys held:
  * - Ctrl/Cmd + Shift → citekey
- * - Shift            → wikilink
+ * - Shift            → footnote (ZotFlow Evo: a numbered footnote at the
+ *                      drop, Pandoc's citation with the page as its text)
+ * - Alt              → wikilink (ZotFlow Evo: Shift's before)
  * - Ctrl/Cmd         → footnote
- * - Alt              → pandoc
  * - (none)           → settings default
  */
 export function resolveFormatFromModifiers(event: {
@@ -128,9 +129,9 @@ export function resolveFormatFromModifiers(event: {
     altKey: boolean;
 }): CitationFormat {
     if ((event.ctrlKey || event.metaKey) && event.shiftKey) return "citekey";
-    if (event.shiftKey) return "wikilink";
+    if (event.shiftKey) return "footnote";
+    if (event.altKey) return "wikilink";
     if (event.ctrlKey || event.metaKey) return "footnote";
-    if (event.altKey) return "pandoc";
     return services.settings.defaultCitationFormat;
 }
 
@@ -284,16 +285,19 @@ function insertNumberedCitation(
     pos: EditorPosition,
     result: CitationResult,
 ): void {
-    const cite = result.evoCite!;
+    const cites = result.evoCites ?? [result.evoCite!];
     const text = editor.getValue();
     const at = editor.posToOffset(pos);
     const before = /\[\^(\d+)\]$/.exec(text.slice(Math.max(0, at - 24), at));
     if (before) {
         const def = scanFootnotes(text).defs.find((d) => d.label === before[1]);
         const items = def ? parseCluster(def.body) : null;
-        if (def && items && !items.some((i) => i.citekey === cite.citekey)) {
+        const fresh = items
+            ? cites.filter((c) => !items.some((i) => i.citekey === c.citekey))
+            : [];
+        if (def && items && fresh.length) {
             // Written in Pandoc's form, the works before it too.
-            const added = formatCluster([...items, cite]);
+            const added = formatCluster([...items, ...fresh]);
             editor.transaction({
                 changes: [
                     {

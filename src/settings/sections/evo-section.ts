@@ -141,7 +141,7 @@ export class EvoSection {
                 items: [
                     {
                         name: "Reference",
-                        desc: "LiquidJS template for the reference that follows a highlight or comment dragged from a PDF or a snapshot into a note. Variables: author, year, shortTitle, title, page (missing for a snapshot: {% if page %}…{% endif %}), link (opens the document at that place), text, comment, color, and item as in the display title template. Leave empty for no reference. Holding Shift, Ctrl/Cmd or Alt while dropping gives a citation format instead.",
+                        desc: "LiquidJS template for the reference that follows a highlight or comment dragged from a PDF or a snapshot into a note. Variables: author, year, shortTitle, title, page (missing for a snapshot: {% if page %}…{% endif %}), link (opens the document at that place), text, comment, color, and item as in the display title template. Leave empty for no reference. Holding a key while dropping (a highlight, a comment, or an item from the library) gives a citation instead: Shift a numbered footnote at the drop with Pandoc's citation (and the page) as its text, Alt the wikilink (an embed), Ctrl/Cmd+Shift the citation key.",
                         render: (setting) => {
                             setting.addTextArea((area) => {
                                 area.setPlaceholder(DEFAULT_DROP_LINK_TEMPLATE)

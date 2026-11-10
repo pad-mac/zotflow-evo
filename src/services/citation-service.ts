@@ -33,6 +33,11 @@ export interface CitationResult {
      * the cursor.
      */
     evoCite?: ClusterItem;
+    /**
+     * ZotFlow Evo: several works in one footnote (items dragged out of the
+     * library together), `evoCite` the first of them.
+     */
+    evoCites?: ClusterItem[];
 }
 
 /**

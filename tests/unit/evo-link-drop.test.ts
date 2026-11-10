@@ -22,6 +22,9 @@ interface MockState {
     ensured: string[];
     ensureFails: Set<string>;
     notices: string[];
+    /** ZotFlow Evo: numbered footnotes on; the citations resolved for them. */
+    evoFootnotes: boolean;
+    resolved: { item: unknown; format: string }[];
 }
 
 const state = vi.hoisted(() => ({
@@ -30,6 +33,8 @@ const state = vi.hoisted(() => ({
     ensured: [],
     ensureFails: new Set<string>(),
     notices: [],
+    evoFootnotes: false,
+    resolved: [],
 })) as unknown as MockState;
 
 vi.mock("services/services", () => ({
@@ -50,6 +55,23 @@ vi.mock("services/services", () => ({
             fileManager: {
                 generateMarkdownLink: (file: TFile, sourcePath: string) =>
                     `[[${file.path.replace(/\.md$/, "")}|from ${sourcePath}]]`,
+            },
+        },
+        get settings() {
+            return { evoFootnotes: state.evoFootnotes };
+        },
+        citationService: {
+            resolve: (item: { key: string }, format: string) => {
+                state.resolved.push({ item, format });
+                const citekey = item.key.toLowerCase();
+                const label = `zfc${item.key}`;
+                const evoCite = { citekey, locator: "", label: "page", prefix: "", suffix: "" };
+                return Promise.resolve({
+                    citation: `[^${label}]`,
+                    citekey,
+                    footnoteDef: `[^${label}]: [@${citekey}]`,
+                    evoCite,
+                });
             },
         },
         logService: { error: () => undefined },
@@ -100,6 +122,15 @@ function fakeEditor(text: string, cursor: { line: number; ch: number }) {
         setCursor: (pos: { line: number; ch: number }) => {
             cur = { ...pos };
         },
+        /** One transaction: every change against the document as it was. */
+        transaction: ({ changes }: { changes: { from: { line: number; ch: number }; to?: { line: number; ch: number }; text: string }[] }) => {
+            let doc = lines.join("\n");
+            const offs = changes
+                .map((c) => ({ from: offsetOf(c.from), to: c.to ? offsetOf(c.to) : offsetOf(c.from), text: c.text }))
+                .sort((a, b) => b.from - a.from);
+            for (const c of offs) doc = doc.slice(0, c.from) + c.text + doc.slice(c.to);
+            lines = doc.split("\n");
+        },
     };
     return {
         editor: editor as unknown as Editor,
@@ -112,7 +143,7 @@ function fakeEditor(text: string, cursor: { line: number; ch: number }) {
     };
 }
 
-const dropOf = (items: unknown, mods: Record<string, boolean> = {}) => {
+const dropOf = (items: unknown, mods: Record<string, boolean> = {}, citation = "") => {
     let prevented = false;
     return {
         shiftKey: false,
@@ -130,7 +161,9 @@ const dropOf = (items: unknown, mods: Record<string, boolean> = {}) => {
             getData: (type: string) =>
                 type === ZOTFLOW_SOURCE_LINKS_MIME && items !== undefined
                     ? JSON.stringify({ type: "zotflow-source-links", items })
-                    : "",
+                    : type === "application/zotflow-citation"
+                      ? citation
+                      : "",
         },
     } as unknown as DragEvent;
 };
@@ -144,6 +177,8 @@ beforeEach(() => {
     state.ensured = [];
     state.ensureFails = new Set();
     state.notices = [];
+    state.evoFootnotes = false;
+    state.resolved = [];
 });
 
 describe("planLinkDrop", () => {
@@ -203,6 +238,29 @@ describe("parseSourceLinksPayload", () => {
 });
 
 describe("handleSourceLinkDrop", () => {
+    it("ZotFlow Evo: Shift — one numbered footnote at the drop citing them all, without a page", async () => {
+        state.evoFootnotes = true;
+        const e = fakeEditor("see  here", { line: 0, ch: 4 });
+        const evt = dropOf([item("AAAA"), item("BBBB")], { shiftKey: true });
+        expect(handleSourceLinkDrop(evt, e.editor, info)).toBe(true);
+        expect(evt.defaultPrevented).toBe(true);
+        await vi.waitFor(() =>
+            expect(e.doc).toBe("see [^zfcAAAA] here\n\n[^zfcAAAA]: [@aaaa; @bbbb]\n"),
+        );
+        expect(state.resolved.map((r) => r.format)).toEqual(["footnote", "footnote"]);
+        // Right after a citation footnote: they join it.
+        const j = fakeEditor("Text[^1] more\n\n[^1]: [@x, p. 2]", { line: 0, ch: 8 });
+        handleSourceLinkDrop(dropOf([item("AAAA"), item("BBBB")], { shiftKey: true }), j.editor, info);
+        await vi.waitFor(() => expect(j.doc).toBe("Text[^1] more\n\n[^1]: [@x, p. 2; @aaaa; @bbbb]"));
+    });
+
+    it("ZotFlow Evo: Shift on a drag with a citation of its own (the item tree): left to the citation formats", () => {
+        state.evoFootnotes = true;
+        const e = fakeEditor("x", { line: 0, ch: 1 });
+        const evt = dropOf([item("AAAA")], { shiftKey: true }, '{"type":"zotflow-citation","libraryID":1,"key":"AAAA"}');
+        expect(handleSourceLinkDrop(evt, e.editor, info)).toBe(false);
+    });
+
     it("leaves other drops, and drops with a modifier key, alone", () => {
         const e = fakeEditor("x", { line: 0, ch: 1 });
         expect(handleSourceLinkDrop(dropOf(undefined), e.editor, info)).toBe(false);

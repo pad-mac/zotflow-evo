@@ -21,7 +21,7 @@ vi.mock("services/services", () => ({
         get settings() {
             return state.settings;
         },
-        app: {},
+        app: { workspace: { getLeavesOfType: () => [] } },
         citationService: {
             resolve: (...args: unknown[]) => {
                 state.resolved.push(args);
