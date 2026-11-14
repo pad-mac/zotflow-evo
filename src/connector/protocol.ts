@@ -190,6 +190,34 @@ export function extensionFor(contentType: string, url = ""): string {
     return "bin";
 }
 
+/**
+ * A file's name from its address (Zotero's `_getFileNameFromURL()`): the
+ * last part of the path without its extension, else the last folder, else
+ * the host; with `extension`; made valid and at most 100 characters
+ * (`importFromSnapshotContent()`).
+ */
+export function fileNameFromURL(url: string, extension: string): string {
+    let base = "";
+    try {
+        const u = new URL(url);
+        const last = u.pathname.split("/").pop() ?? "";
+        base = last.replace(/\.[^.]*$/, "");
+        if (!base) base = /\/([^/]+)\/$/.exec(u.pathname)?.[1] ?? u.hostname;
+        try {
+            base = decodeURIComponent(base);
+        } catch {
+            // As it is.
+        }
+    } catch {
+        base = "";
+    }
+    // Zotero.File.getValidFileName(): no path or reserved characters, no control characters.
+    // eslint-disable-next-line no-control-regex -- control characters are what is taken out
+    base = base.replace(/[/\\?*:|"<>\u0000-\u001f]/g, "").replace(/^[.\s]+|[.\s]+$/g, "");
+    const name = `${base || "file"}.${extension}`;
+    return name.length > 100 ? `${base.slice(0, 100 - extension.length - 1)}.${extension}` : name;
+}
+
 /** An item as the Zotero web API takes it. */
 export type ApiItem = Record<string, unknown> & {
     key?: string;
@@ -279,11 +307,11 @@ export function namePartsOf(item: ApiItem | undefined): {
 }
 
 /** The answer to a ping: what this "client" does. */
-export function pingPrefs(): Record<string, unknown> {
+export function pingPrefs(options: { files: boolean; snapshots: boolean }): Record<string, unknown> {
     return {
-        // Files go to Zotero's storage through ZotFlow; HTML snapshots only on request.
-        downloadAssociatedFiles: true,
-        automaticSnapshots: false,
+        // Zotero's preferences of the same names (its defaults: both on).
+        downloadAssociatedFiles: options.files,
+        automaticSnapshots: options.snapshots,
         reportActiveURL: false,
         supportsAttachmentUpload: true,
         supportsTagsAutocomplete: false,

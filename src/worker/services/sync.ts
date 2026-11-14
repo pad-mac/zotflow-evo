@@ -171,6 +171,31 @@ export class SyncService {
     }
 
     /**
+     * ZotFlow Evo: objects just written to Zotero with the web API from here
+     * (the browser connector), as Zotero returned them, stored the way a
+     * download stores them: they show at once, and the next sync finds
+     * their versions known. Returns how many were stored or changed.
+     */
+    async applyWrittenObjects(libraryID: number, objects: AnyZoteroItem[]): Promise<number> {
+        if (!objects.length || !(await db.libraries.get(libraryID))) return 0;
+        const changed: ItemIdentifier[] = [];
+        await this.processBatch(libraryID, sortParentsFirst(objects), new Date().toISOString(), changed, null);
+        if (changed.length) this.parentHost.emit("treeChanged");
+        return changed.length;
+    }
+
+    /**
+     * ZotFlow Evo: objects just deleted in Zotero with the web API from here
+     * (a save the browser connector moved to another library), removed as a
+     * download's deletions are.
+     */
+    async applyWrittenDeletions(libraryID: number, keys: string[]): Promise<void> {
+        if (!keys.length || !(await db.libraries.get(libraryID))) return;
+        await this.processDeletions(libraryID, keys, []);
+        this.parentHost.emit("treeChanged");
+    }
+
+    /**
      * Start the synchronization process.
      * This is the main entry point for the worker sync task.
      */

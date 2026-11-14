@@ -151,6 +151,10 @@ export interface ZotFlowSettings {
     evoConnector: boolean;
     /** ZotFlow Evo: where the browser connector saved last ("L1", "C1:KEY"). */
     evoConnectorTarget: string;
+    /** ZotFlow Evo: Zotero's "automatically attach associated PDFs and other files", for the browser connector (also: find open-access PDFs). */
+    evoConnectorFiles: boolean;
+    /** ZotFlow Evo: Zotero's "automatically take snapshots when creating items from web pages", for the browser connector. */
+    evoConnectorSnapshots: boolean;
     /** ZotFlow Evo: the order of collections set by dragging them, by parent ("libraryID:parentKey", or "pinned"). */
     evoCollectionOrder: Record<string, string[]>;
     /** ZotFlow Evo: the library browser shows the selected item on the right. */
@@ -341,6 +345,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoPinnedCollections: [],
     evoConnector: false,
     evoConnectorTarget: "",
+    evoConnectorFiles: true,
+    evoConnectorSnapshots: true,
     evoCollectionOrder: {},
     evoLibraryDetailsShown: true,
     evoCollectionDetailsShown: true,

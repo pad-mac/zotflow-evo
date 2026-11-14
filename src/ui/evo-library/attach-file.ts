@@ -460,16 +460,29 @@ export interface AttachNameParts {
     itemType: string;
 }
 
+/** How a new attachment is made beyond its file (the browser connector's, as Zotero makes them). */
+export interface AttachOptions {
+    /** false: no sync after it (the caller adds more first). */
+    sync?: boolean;
+    /** Default: its file name. */
+    title?: string;
+    /** Where the file came from: an `imported_url` attachment, as Zotero saves files from the web. */
+    url?: string;
+    /** Default: from the "file name" template (with the file's extension). */
+    filename?: string;
+    charset?: string;
+}
+
 /**
- * uploadAttachment(), returning the new attachment's key too; `sync`
- * false: no sync after it (the caller adds more first).
+ * uploadAttachment(), returning the new attachment's key too, and the md5
+ * of what was stored in Zotero's storage (null: a group's shared folder).
  */
 export async function uploadAttachmentWithKey(
     target: { libraryID: number; key: string },
     file: FetchedFile,
     parts?: AttachNameParts,
-    { sync = true }: { sync?: boolean } = {},
-): Promise<{ filename: string; key: string }> {
+    { sync = true, title, url, filename: givenName, charset }: AttachOptions = {},
+): Promise<{ filename: string; key: string; md5: string | null }> {
     const refusal = attachRefusal(target.libraryID);
     if (refusal) throw new Error(refusal);
     const apiKey = services.settings.zoteroapikey;
@@ -481,7 +494,9 @@ export async function uploadAttachmentWithKey(
     // with the group's scheme; Zotero's storage never gets it.
     const shared = sharedFolderOf(target.libraryID);
     let filename: string;
-    if (shared) {
+    if (givenName && !shared) {
+        filename = givenName;
+    } else if (shared) {
         const sharedParts = parts
             ? {
                   lastNames: parts.lastName ? [parts.lastName] : [],
@@ -521,13 +536,13 @@ export async function uploadAttachmentWithKey(
             {
                 itemType: "attachment",
                 parentItem: target.key,
-                linkMode: "imported_file",
-                title: filename,
-                accessDate: "",
-                url: "",
+                linkMode: url ? "imported_url" : "imported_file",
+                title: title || filename,
+                accessDate: url ? new Date().toISOString().replace(/\.\d+Z$/, "Z") : "",
+                url: url ?? "",
                 note: "",
                 contentType: file.contentType,
-                charset: "",
+                charset: charset ?? "",
                 filename,
                 md5: null,
                 mtime: null,
@@ -549,20 +564,21 @@ export async function uploadAttachmentWithKey(
     }
 
     // 2–4. The file, into Zotero's storage (a shared folder has it already).
-    if (!shared)
-        await uploadFileBytes(
-            { libraryID: target.libraryID, key: attachmentKey },
-            file.bytes,
-            filename,
-            null,
-        );
+    const md5 = shared
+        ? null
+        : await uploadFileBytes(
+              { libraryID: target.libraryID, key: attachmentKey },
+              file.bytes,
+              filename,
+              null,
+          );
 
     // Bring the new attachment here.
     if (sync)
         void startSync(target.libraryID, true).catch(() => {
             // The next sync brings it.
         });
-    return { filename, key: attachmentKey };
+    return { filename, key: attachmentKey, md5 };
 }
 
 /* ------------------------------------------------------------------ */

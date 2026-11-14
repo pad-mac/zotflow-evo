@@ -1,9 +1,15 @@
 /**
  * ZotFlow Evo: what the browser connector's saves are written with — Zotero's
  * web API (as the rest of ZotFlow writes), the file name template and the
- * sync. See FORK.md, "Browser connector".
+ * sync. What Zotero answers is stored in ZotFlow's database at once, as a
+ * sync would store it (and a file's bytes kept here), so a save shows
+ * without waiting for the sync. See FORK.md, "Browser connector".
  */
 import { requestUrl } from "obsidian";
+import SparkMD5 from "spark-md5";
+
+import { workerBridge } from "bridge";
+import { findOpenAccessFile, type FetchResult } from "connector/find-file";
 
 import { services } from "services/services";
 import { startSync } from "ui/start-sync";
@@ -18,12 +24,30 @@ import { parseTargetId, targetId } from "connector/protocol";
 
 import type { RequestUrlResponse } from "obsidian";
 import type { ApiItem, ConnectorTarget } from "connector/protocol";
-import type { ConnectorApi, ConnectorFile } from "connector/sessions";
+import type { AnyZoteroItem } from "types/zotero";
+import type { AttachFileOptions, ConnectorApi, ConnectorFile } from "connector/sessions";
 
 /** A save is synced this long after its last change (more files may follow). */
 const SYNC_DELAY_MS = 1500;
 /** delaySync: the popup is open; hold the sync this long. */
 const SYNC_HOLD_MS = 10_000;
+
+/** A request for the open-access search, through Obsidian (no CORS, redirects followed). */
+async function fetchUrl(
+    url: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string },
+): Promise<FetchResult> {
+    const res = await requestUrl({
+        url,
+        method: init?.method ?? "GET",
+        headers: init?.headers,
+        body: init?.body,
+        throw: false,
+    });
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(res.headers ?? {})) lower[k.toLowerCase()] = v;
+    return { status: res.status, headers: lower, bytes: new Uint8Array(res.arrayBuffer) };
+}
 
 function apiBase(libraryID: number): string {
     return services.libraryCache.isGroup(libraryID)
@@ -87,11 +111,12 @@ export class WebApiConnector implements ConnectorApi {
                 throw: false,
             });
             const json = jsonOf<{
-                successful?: Record<string, { key?: string; version?: number }>;
+                successful?: Record<string, AnyZoteroItem>;
                 failed?: Record<string, { message?: string }>;
             }>(res);
             if (res.status >= 300 || !json)
                 throw new Error(`Zotero refused the new items (${res.status}).`);
+            await this.show(libraryID, Object.values(json.successful ?? {}));
             batch.forEach((_, i) => {
                 const ok = json.successful?.[String(i)];
                 out.push(
@@ -120,7 +145,10 @@ export class WebApiConnector implements ConnectorApi {
                 body: JSON.stringify(patch),
                 throw: false,
             });
-            if (res.status < 300) return;
+            if (res.status < 300) {
+                await this.refresh(libraryID, [key]);
+                return;
+            }
             // Changed since (a file was added, a sync): once more, with its version now.
             if (res.status === 412 && attempt === 0) {
                 v = await this.itemVersion(libraryID, key);
@@ -145,6 +173,7 @@ export class WebApiConnector implements ConnectorApi {
                 if (res.status === 412 && attempt === 0) continue;
                 throw new Error(`Zotero refused to delete (${res.status}).`);
             }
+            await this.showRemoved(libraryID, batch);
         }
     }
 
@@ -152,15 +181,28 @@ export class WebApiConnector implements ConnectorApi {
         target: { libraryID: number; key: string },
         file: ConnectorFile,
         nameParts: Parameters<ConnectorApi["attachFile"]>[2],
+        options: AttachFileOptions,
     ): Promise<string> {
         const bytes = file.bytes.slice().buffer;
-        const { key } = await uploadAttachmentWithKey(
+        const { key, filename, md5 } = await uploadAttachmentWithKey(
             target,
             { bytes, contentType: file.contentType, extension: file.extension, route: "browser connector" },
             nameParts,
-            { sync: false },
+            {
+                sync: false,
+                title: options.title,
+                url: options.url,
+                filename: options.filename,
+                charset: options.charset,
+            },
         );
+        if (md5) await this.keepFile(target.libraryID, key, bytes, md5, filename, file.contentType);
+        await this.refresh(target.libraryID, [key]);
         return key;
+    }
+
+    async findFile(doi: string) {
+        return findOpenAccessFile(doi, fetchUrl);
     }
 
     async standaloneFile(target: ConnectorTarget, file: ConnectorFile): Promise<string> {
@@ -168,16 +210,74 @@ export class WebApiConnector implements ConnectorApi {
             throw new Error(
                 "This group keeps its files in a shared folder; save the file to an item instead.",
             );
-        return createAttachmentWithFile(
+        const filename = fileNameOf(file.title || "file", file.extension);
+        const key = await createAttachmentWithFile(
             target.libraryID,
             {
                 collectionKey: target.collectionKey,
                 title: file.title || fileNameOf(file.url, file.extension),
-                filename: fileNameOf(file.title || "file", file.extension),
+                filename,
                 contentType: file.contentType,
             },
             file.bytes,
         );
+        const bytes = file.bytes.slice().buffer;
+        await this.keepFile(target.libraryID, key, bytes, SparkMD5.ArrayBuffer.hash(bytes), filename, file.contentType);
+        await this.refresh(target.libraryID, [key]);
+        return key;
+    }
+
+    /**
+     * Zotero's answer, stored as a sync would store it, so it shows now;
+     * the sync that follows finds its versions known. A failure here only
+     * leaves it to the sync.
+     */
+    private async show(libraryID: number, objects: AnyZoteroItem[]): Promise<void> {
+        if (!objects.length) return;
+        try {
+            await workerBridge.sync.applyWrittenObjects(libraryID, objects);
+        } catch (e) {
+            services.logService.warn("Could not show a save before the sync", "Connector", e);
+        }
+    }
+
+    private async showRemoved(libraryID: number, keys: string[]): Promise<void> {
+        try {
+            await workerBridge.sync.applyWrittenDeletions(libraryID, keys);
+        } catch (e) {
+            services.logService.warn("Could not remove a moved save before the sync", "Connector", e);
+        }
+    }
+
+    /** These items as Zotero has them now (with their CSL-JSON), stored here. */
+    private async refresh(libraryID: number, keys: string[]): Promise<void> {
+        try {
+            const res = await requestUrl({
+                url: `${apiBase(libraryID)}/items?itemKey=${keys.join(",")}&include=data,csljson&includeTrashed=1`,
+                headers: headers(),
+                throw: false,
+            });
+            const list = jsonOf<AnyZoteroItem[]>(res);
+            if (res.status < 300 && Array.isArray(list)) await this.show(libraryID, list);
+        } catch (e) {
+            services.logService.warn("Could not fetch a saved item", "Connector", e);
+        }
+    }
+
+    /** The bytes just uploaded, kept here as the file of that md5: opening it needs no download. */
+    private async keepFile(
+        libraryID: number,
+        key: string,
+        bytes: ArrayBuffer,
+        md5: string,
+        filename: string,
+        contentType: string,
+    ): Promise<void> {
+        try {
+            await workerBridge.attachment.putEditedFile(libraryID, key, bytes, md5, filename, contentType);
+        } catch (e) {
+            services.logService.warn("Could not keep a saved file here", "Connector", e);
+        }
     }
 
     filesEditable(libraryID: number): boolean {

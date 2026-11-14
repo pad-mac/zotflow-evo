@@ -84,7 +84,7 @@ function fakeApi() {
     const calls: [string, unknown][] = [];
     let n = 0;
     let target = { libraryID: 1, collectionKey: "CYB22222" as string | null };
-    const api: ConnectorApi & { calls: typeof calls; refuse?: boolean } = {
+    const api: ConnectorApi & { calls: typeof calls; refuse?: boolean; noFile?: boolean } = {
         calls,
         writeItems: (libraryID, items) => {
             calls.push(["write", { libraryID, items }]);
@@ -104,9 +104,17 @@ function fakeApi() {
             calls.push(["delete", { libraryID, keys }]);
             return Promise.resolve();
         },
-        attachFile: (t, file, parts) => {
-            calls.push(["attach", { t, type: file.contentType, ext: file.extension, title: file.title, size: file.bytes.length, parts }]);
+        attachFile: (t, file, parts, options) => {
+            calls.push(["attach", { t, type: file.contentType, ext: file.extension, title: file.title, size: file.bytes.length, parts, options }]);
             return Promise.resolve(`F${String(++n).padStart(7, "0")}`);
+        },
+        findFile: (doi) => {
+            calls.push(["find", doi]);
+            return Promise.resolve(
+                api.noFile
+                    ? null
+                    : { bytes: new Uint8Array([37, 80, 68, 70, 45]), contentType: "application/pdf", url: "https://repo.example/oa.pdf", title: "Accepted Version" },
+            );
         },
         standaloneFile: (t, file) => {
             calls.push(["standalone", { t, type: file.contentType, title: file.title }]);
@@ -255,6 +263,40 @@ describe("a save, then the popup's changes", () => {
         expect(of(api, "attach")[1]!.t).toEqual({ libraryID: 1, key: "YT2E79TT" });
     });
 
+    it("files as Zotero makes them: the PDF from its address with its title; the snapshot named from the page", async () => {
+        await sessions.saveItems(article());
+        await sessions.saveAttachment("S1", { parentItemID: "it1" }, {
+            bytes: new Uint8Array(4), contentType: "application/pdf", extension: "pdf", title: "Full Text PDF", url: "http://localhost:8089/paper.pdf",
+        });
+        expect(of(api, "attach")[0]!.options).toEqual({ title: "Full Text PDF", url: "http://localhost:8089/paper.pdf" });
+        await sessions.saveSnapshotFile("S1", "<html>…</html>", "Snapshot", "https://journal.example/articles/kybernetik-und-gesellschaft?x=1");
+        expect(of(api, "attach")[1]).toMatchObject({
+            type: "text/html",
+            ext: "html",
+            options: { title: "Snapshot", url: "https://journal.example/articles/kybernetik-und-gesellschaft?x=1", filename: "kybernetik-und-gesellschaft.html", charset: "utf-8" },
+        });
+    });
+
+    it("no file from the page: an open-access one by the DOI (Zotero's resolvers), with its version as title", async () => {
+        const a = article();
+        (a.zotflow.apiItems[0]![0] as Record<string, unknown>).DOI = "https://doi.org/10.1371/journal.pone.0115253";
+        await sessions.saveItems(a);
+        expect(sessions.hasResolvers("S1", "it1")).toBe(true);
+        expect(await sessions.saveFromResolver("S1", "it1")).toBe("Accepted Version");
+        expect(api.calls).toContainEqual(["find", "10.1371/journal.pone.0115253"]);
+        expect(of(api, "attach")[0]).toMatchObject({
+            t: { libraryID: 1, key: "YT2E79TT" },
+            ext: "pdf",
+            options: { title: "Accepted Version", url: "https://repo.example/oa.pdf" },
+        });
+        api.noFile = true;
+        await expect(sessions.saveFromResolver("S1", "it1")).rejects.toMatchObject({ status: 500 });
+        // No DOI (not in Extra either): nothing to look for.
+        await sessions.saveItems({ ...article("ZZZZ3333"), sessionID: "S9" });
+        expect(sessions.hasResolvers("S9", "it1")).toBe(false);
+        await expect(sessions.saveFromResolver("S9", "nope")).rejects.toMatchObject({ status: 400 });
+    });
+
     it("a session saved twice; an item Zotero refuses: nothing kept", async () => {
         await sessions.saveItems(article());
         await expect(sessions.saveItems(article())).rejects.toMatchObject({ status: 409, message: "SESSION_EXISTS" });
@@ -284,6 +326,7 @@ describe("over HTTP, as the extension sends it", () => {
             defaultTarget: () => api.defaultTarget(),
             listed: () => {},
             holdSync: () => void api.calls.push(["hold", null]),
+            prefs: () => ({ files: true, snapshots: false }),
             failed: (m) => void failures.push(m),
         });
         server = createConnectorServer(http, handler, () => {});
@@ -309,7 +352,7 @@ describe("over HTTP, as the extension sends it", () => {
         expect(ping.status).toBe(200);
         expect(ping.headers.get("x-zotero-version")).toBe("ZotFlow");
         expect((await ping.json()) as unknown).toMatchObject({
-            prefs: { supportsAttachmentUpload: true, downloadAssociatedFiles: true },
+            prefs: { supportsAttachmentUpload: true, downloadAssociatedFiles: true, automaticSnapshots: false },
         });
         expect(((await ping.json().catch(() => ({}))) as { prefs?: { translatorsHash?: string } }).prefs?.translatorsHash).toBeUndefined();
 
@@ -335,6 +378,7 @@ describe("over HTTP, as the extension sends it", () => {
 
         expect((await post("updateSession", { sessionID: "S1", target: "C1:PIN44444", tags: "x", note: "" })).status).toBe(200);
         expect(of(api, "patch")[0]).toMatchObject({ patch: { collections: ["PIN44444"] } });
+        expect((await post("hasAttachmentResolvers", { sessionID: "S1", itemID: "it1" })).status).toBe(200);
         expect((await post("delaySync", {})).status).toBe(204);
         expect(api.calls).toContainEqual(["hold", null]);
         expect((await post("saveItems", article())).status).toBe(409);

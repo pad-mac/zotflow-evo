@@ -1,11 +1,14 @@
 /**
  * ZotFlow Evo: one save from the browser connector, from the items to the
  * files that follow them and the changes made in the Connector's popup
- * (another collection or library, tags, a note). Written with Zotero's web
- * API, through `ConnectorApi`; a sync then brings it all into ZotFlow. See
- * FORK.md, "Browser connector".
+ * (another collection or library, tags, a note), and an open-access file
+ * looked for when the browser found none. Written with Zotero's web API,
+ * through `ConnectorApi`, which also stores what Zotero returned in
+ * ZotFlow at once. See FORK.md, "Browser connector".
  */
+import { doiOf, hasFileResolvers, type FoundFile } from "connector/find-file";
 import {
+    fileNameFromURL,
     itemsToWrite,
     namePartsOf,
     parseTags,
@@ -30,12 +33,15 @@ export interface ConnectorApi {
         version?: number,
     ): Promise<void>;
     deleteItems(libraryID: number, keys: string[]): Promise<void>;
-    /** A stored file under `parentKey`; its attachment's key. */
+    /** A stored file under `parentKey` (from `url`, as Zotero saves files from the web); its attachment's key. */
     attachFile(
         target: { libraryID: number; key: string },
         file: ConnectorFile,
         nameParts: ReturnType<typeof namePartsOf>,
+        options: AttachFileOptions,
     ): Promise<string>;
+    /** An open-access file for this DOI (Zotero's resolvers), or null. */
+    findFile(doi: string): Promise<FoundFile | null>;
     /** A stored file on its own, in a collection or not; its key. */
     standaloneFile(
         target: ConnectorTarget,
@@ -49,6 +55,14 @@ export interface ConnectorApi {
     defaultTarget(): ConnectorTarget | null;
     /** The popup chose this target: it becomes the default. */
     rememberTarget(target: ConnectorTarget): void;
+}
+
+/** As Zotero makes the attachment: its title, where the file came from, its name when not from the template. */
+export interface AttachFileOptions {
+    title: string;
+    url: string;
+    filename?: string;
+    charset?: string;
 }
 
 export interface ConnectorFile {
@@ -73,6 +87,8 @@ interface SavedFile {
     /** The translator item it belongs to (none: a file on its own). */
     parent: string | null;
     file: ConnectorFile;
+    /** For a file under an item. */
+    options?: AttachFileOptions;
     /** Its attachment, once written. */
     key: string | null;
 }
@@ -168,9 +184,48 @@ export class ConnectorSessions {
                 : "";
         if (!session.keys.has(parent))
             throw new ConnectorError(400, "The file's item is not in this save.");
-        const saved: SavedFile = { parent, file, key: null };
+        // Zotero: importFromNetworkStream() with the title and address the Connector sent.
+        const saved: SavedFile = {
+            parent,
+            file,
+            options: { title: file.title || "Attachment", url: file.url },
+            key: null,
+        };
         session.files.push(saved);
         await this.run(session, () => this.writeFile(session, saved));
+    }
+
+    /**
+     * hasAttachmentResolvers: whether Zotero would look for an open-access
+     * file for this item (`getFileResolvers(item, ['oa', 'custom'], true)`:
+     * it has a DOI).
+     */
+    hasResolvers(sessionID: string, itemID: unknown): boolean {
+        const session = this.get(sessionID);
+        return hasFileResolvers(this.apiItemOf(session, itemID));
+    }
+
+    /**
+     * saveAttachmentFromResolver: the first open-access file Zotero's
+     * resolvers give, saved under the item (`addFileFromURLs()`); its title.
+     */
+    async saveFromResolver(sessionID: string, itemID: unknown): Promise<string> {
+        const session = this.get(sessionID);
+        const parent = this.parentId(session, itemID);
+        const doi = doiOf(this.apiItemOf(session, itemID));
+        if (!doi) throw new ConnectorError(500, "Failed to save an attachment");
+        const found = await this.api.findFile(doi);
+        if (!found) throw new ConnectorError(500, "Failed to save an attachment");
+        const extension = found.contentType === "application/epub+zip" ? "epub" : "pdf";
+        const saved: SavedFile = {
+            parent,
+            file: { bytes: found.bytes, contentType: found.contentType, extension, title: found.title, url: found.url },
+            options: { title: found.title, url: found.url },
+            key: null,
+        };
+        session.files.push(saved);
+        await this.run(session, () => this.writeFile(session, saved));
+        return found.title;
     }
 
     /** saveSingleFile: the page as an HTML snapshot, under the save's first item. */
@@ -191,7 +246,18 @@ export class ConnectorSessions {
             title: title || "Snapshot",
             url,
         };
-        const saved: SavedFile = { parent, file, key: null };
+        // Zotero: importFromSnapshotContent() — named from the address, in UTF-8.
+        const saved: SavedFile = {
+            parent,
+            file,
+            options: {
+                title: file.title,
+                url,
+                filename: fileNameFromURL(url, "html"),
+                charset: "utf-8",
+            },
+            key: null,
+        };
         session.files.push(saved);
         await this.run(session, () => this.writeFile(session, saved));
     }
@@ -248,6 +314,19 @@ export class ConnectorSessions {
 
     has(sessionID: string): boolean {
         return this.sessions.has(sessionID);
+    }
+
+    private parentId(session: Session, itemID: unknown): string {
+        const id = typeof itemID === "string" || typeof itemID === "number" ? String(itemID) : "";
+        if (!session.keys.has(id)) throw new ConnectorError(400, "The item is not in this save.");
+        return id;
+    }
+
+    /** The item as written (Zotero's web API form), by the Connector's id for it. */
+    private apiItemOf(session: Session, itemID: unknown): ApiItem | undefined {
+        const id = this.parentId(session, itemID);
+        const i = session.items.findIndex((it) => String(it.id) === id);
+        return session.apiItems[i]?.[0];
     }
 
     /* -------------------------------------------------------------- */
@@ -352,6 +431,7 @@ export class ConnectorSessions {
                 { libraryID, key },
                 saved.file,
                 namePartsOf(session.apiItems[i]?.[0]),
+                saved.options ?? { title: saved.file.title, url: saved.file.url },
             );
         }
         session.written.push(saved.key);

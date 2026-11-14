@@ -293,6 +293,16 @@ export class EvoSection {
                         desc: "Listen for the Zot Vitro Connector, a Firefox extension made from the Zotero Connector: what it saves goes to Zotero through ZotFlow — to the library or collection shown last in a library tab, with pinned collections on top of its list — and is synced here. Use it instead of the Zotero Connector. Needs the API key; desktop only; while Obsidian runs.",
                         control: { type: "toggle", key: "evoConnector" },
                     },
+                    {
+                        name: "Attach PDFs and other files",
+                        desc: "As Zotero's \"Automatically attach associated PDFs and other files when saving items\": the files a page offers, fetched by the browser; when it has none, an open-access PDF found by the item's DOI (Zotero's own search, with Unpaywall).",
+                        control: { type: "toggle", key: "evoConnectorFiles" },
+                    },
+                    {
+                        name: "Take snapshots of web pages",
+                        desc: "As Zotero's \"Automatically take snapshots when creating items from web pages\": the page saved as an HTML snapshot under the item.",
+                        control: { type: "toggle", key: "evoConnectorSnapshots" },
+                    },
                 ],
             },
             {

@@ -42,6 +42,8 @@ export interface ConnectorContext {
     /** The targets listed, by id: their names. */
     listed(rows: TargetRow[]): void;
     holdSync(): void;
+    /** Zotero's "attach associated files" and "take snapshots" preferences, as ZotFlow's settings have them. */
+    prefs(): { files: boolean; snapshots: boolean };
     /** A save failed: tell the person in Obsidian too. */
     failed(message: string): void;
 }
@@ -75,7 +77,7 @@ export class ConnectorHandler {
         switch (method) {
             case "ping":
                 return post
-                    ? json(200, { prefs: pingPrefs() })
+                    ? json(200, { prefs: pingPrefs(this.ctx.prefs()) })
                     : reply(200, "text/html", "<!DOCTYPE html><html><body>ZotFlow is listening for the Zot Vitro Connector.</body></html>");
             case "getSelectedCollection":
                 return json(200, await this.selected());
@@ -122,8 +124,15 @@ export class ConnectorHandler {
             case "delaySync":
                 this.ctx.holdSync();
                 return reply(204);
-            case "hasAttachmentResolvers":
-                return json(200, false);
+            case "hasAttachmentResolvers": {
+                const data = this.body(req);
+                return json(200, this.sessions.hasResolvers(text(data.sessionID), data.itemID));
+            }
+            case "saveAttachmentFromResolver": {
+                const data = this.body(req);
+                const title = await this.sessions.saveFromResolver(text(data.sessionID), data.itemID);
+                return reply(201, "text/plain", title);
+            }
             case "getClientHostnames":
             case "proxies":
                 return json(200, []);
@@ -197,6 +206,10 @@ export class ConnectorHandler {
             url,
         };
     }
+}
+
+function text(value: unknown): string {
+    return typeof value === "string" ? value : "";
 }
 
 function reply(status: number, contentType?: string, body?: string): ConnectorResponse {

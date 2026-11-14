@@ -33,6 +33,10 @@ function makeHandler(): ConnectorHandler {
             api.targetNames = new Map(rows.map((r) => [r.id, r.name]));
         },
         holdSync: () => api.holdSync(),
+        prefs: () => ({
+            files: services.settings.evoConnectorFiles,
+            snapshots: services.settings.evoConnectorSnapshots,
+        }),
         failed: (message) =>
             services.notificationService.notify("error", `Browser connector: ${message}`),
     });
