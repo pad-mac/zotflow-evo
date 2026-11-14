@@ -62,7 +62,7 @@ export class ZotFlowSettingTab extends PluginSettingTab {
                 name: "Sync",
                 items: [
                     ...this.syncSection.getDefinitions(),
-                    ...pick("Automatic sync", "Group shared folders"),
+                    ...pick("Automatic sync", "Browser connector", "Group shared folders"),
                 ],
             },
             {

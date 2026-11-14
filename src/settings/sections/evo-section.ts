@@ -286,6 +286,17 @@ export class EvoSection {
             },
             {
                 type: "group",
+                heading: "Browser connector",
+                items: [
+                    {
+                        name: "Save from the browser",
+                        desc: "Listen for the Zot Vitro Connector, a Firefox extension made from the Zotero Connector: what it saves goes to Zotero through ZotFlow — to the library or collection shown last in a library tab, with pinned collections on top of its list — and is synced here. Use it instead of the Zotero Connector. Needs the API key; desktop only; while Obsidian runs.",
+                        control: { type: "toggle", key: "evoConnector" },
+                    },
+                ],
+            },
+            {
+                type: "group",
                 heading: "Automatic sync",
                 items: [
                     {

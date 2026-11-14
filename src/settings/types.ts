@@ -147,6 +147,10 @@ export interface ZotFlowSettings {
     evoBookSearchUrl: string;
     /** ZotFlow Evo: collections pinned to the top of the library browser ("libraryID:key"), in order. */
     evoPinnedCollections: string[];
+    /** ZotFlow Evo: listen for the Zot Vitro Connector (browser extension) on 127.0.0.1. Desktop only. */
+    evoConnector: boolean;
+    /** ZotFlow Evo: where the browser connector saved last ("L1", "C1:KEY"). */
+    evoConnectorTarget: string;
     /** ZotFlow Evo: the order of collections set by dragging them, by parent ("libraryID:parentKey", or "pinned"). */
     evoCollectionOrder: Record<string, string[]>;
     /** ZotFlow Evo: the library browser shows the selected item on the right. */
@@ -335,6 +339,8 @@ export const DEFAULT_SETTINGS: ZotFlowSettings = {
     evoAnnotationLayout: { ...DEFAULT_ANNOTATION_LAYOUT },
     evoBookSearchUrl: DEFAULT_BOOK_SEARCH_URL,
     evoPinnedCollections: [],
+    evoConnector: false,
+    evoConnectorTarget: "",
     evoCollectionOrder: {},
     evoLibraryDetailsShown: true,
     evoCollectionDetailsShown: true,

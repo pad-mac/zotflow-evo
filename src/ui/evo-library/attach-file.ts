@@ -351,6 +351,8 @@ export async function createAttachmentWithFile(
         note?: string;
         tags?: string[];
         deleted?: boolean;
+        /** Default: a PDF. */
+        contentType?: string;
     },
     bytes: Uint8Array,
 ): Promise<string> {
@@ -371,7 +373,7 @@ export async function createAttachmentWithFile(
         accessDate: "",
         url: "",
         note: fields.note ?? "",
-        contentType: "application/pdf",
+        contentType: fields.contentType ?? "application/pdf",
         charset: "",
         filename: fields.filename,
         md5: null,

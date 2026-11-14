@@ -36,6 +36,11 @@ import { registerEvoWorkspaceCommands } from "ui/evo-workspace";
 import { registerEvoLibrary } from "ui/evo-library/views";
 import { registerItemsBlock } from "ui/evo-library/items-block";
 import { registerAttachFromWebViewer } from "ui/evo-library/attach-file";
+import {
+    refreshConnector,
+    startConnector,
+    stopConnector,
+} from "connector/server";
 import { registerSourceNoteLinks } from "ui/evo-source-links";
 import { registerEvoApi } from "services/evo-api";
 import { registerEvoStrip } from "ui/evo-strip/follow";
@@ -315,6 +320,8 @@ export default class ZotFlow extends Plugin {
         registerEvoLibrary(this);
         registerItemsBlock(this);
         registerAttachFromWebViewer(this);
+        // ZotFlow Evo: saves from the browser (the Zot Vitro Connector).
+        startConnector();
         // ZotFlow Evo: a click on a link to a source note opens the PDF.
         registerSourceNoteLinks(this);
         // ZotFlow Evo: collection changes, for other plugins (kanban-evo).
@@ -599,6 +606,7 @@ export default class ZotFlow extends Plugin {
     }
 
     onunload() {
+        stopConnector();
         services.viewStateService.flushViewStateSave();
         services.readerDocumentCache.dispose();
         services.enhancementPack.dispose();
@@ -710,6 +718,7 @@ export default class ZotFlow extends Plugin {
         services.updateSettings(this.settings);
         // ZotFlow Evo
         refreshEvoAutoSync();
+        refreshConnector();
         services.viewStateService.setViewStates(this.viewStates);
         services.viewStateService.setCustomThemes(this.customThemes);
         if (this.cslFolder) {
